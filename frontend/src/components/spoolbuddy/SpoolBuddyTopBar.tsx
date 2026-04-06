@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { WifiOff } from 'lucide-react';
 import { api, type Printer } from '../../api/client';
 import { formatTimeOnly } from '../../utils/date';
+import { APP_LOGO_ALT, APP_LOGO_SRC } from '../../constants/branding';
 
 interface SpoolBuddyTopBarProps {
   selectedPrinterId: number | null;
@@ -56,7 +57,7 @@ export function SpoolBuddyTopBar({ selectedPrinterId, onPrinterChange, deviceOnl
     <div className="h-12 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary flex items-center px-3 gap-4 shrink-0">
       {/* Logo */}
       <div className="flex items-center shrink-0">
-        <img src="/img/SYSU.png" alt="SYSU" width={113} height={28} className="h-7 w-auto" />
+        <img src={APP_LOGO_SRC} alt={APP_LOGO_ALT} width={113} height={28} className="h-7 w-auto max-w-full object-contain" />
       </div>
 
       {/* Printer selector - centered */}

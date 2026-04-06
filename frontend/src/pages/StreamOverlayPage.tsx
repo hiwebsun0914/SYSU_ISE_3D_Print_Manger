@@ -6,6 +6,7 @@ import { Layers, Clock, Timer, Printer } from 'lucide-react';
 import { api } from '../api/client';
 import type { PrinterStatus } from '../api/client';
 import { formatDuration, formatETA, type TimeFormat } from '../utils/date';
+import { APP_LOGO_ALT, APP_LOGO_SRC, APP_TITLE } from '../constants/branding';
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
 
@@ -160,11 +161,11 @@ export function StreamOverlayPage() {
 
   // Update document title
   useEffect(() => {
-    document.title = printer ? `${printer.name} - ${t('streamOverlay.title')}` : t('streamOverlay.title');
+    document.title = APP_TITLE;
     return () => {
-      document.title = 'Bambuddy';
+      document.title = APP_TITLE;
     };
-  }, [printer, t]);
+  }, []);
 
   // Refresh stream on error
   const handleStreamError = () => {
@@ -215,9 +216,9 @@ export function StreamOverlayPage() {
         className="absolute top-4 right-4 z-10"
       >
         <img
-          src="/img/SYSU.png"
-          alt="SYSU"
-          className={`${sizes.logoHeight} object-contain drop-shadow-lg hover:scale-105 transition-transform`}
+          src={APP_LOGO_SRC}
+          alt={APP_LOGO_ALT}
+          className={`${sizes.logoHeight} w-auto max-w-[40vw] object-contain drop-shadow-lg hover:scale-105 transition-transform`}
         />
       </a>
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, Cloud, Settings, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Bell, Layers, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Bell, Layers, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -15,6 +15,7 @@ import { Card, CardHeader, CardContent } from './Card';
 import { parseUTCDate } from '../utils/date';
 import { Button } from './Button';
 import { BugReportBubble } from './BugReportBubble';
+import { APP_LOGO_ALT, APP_LOGO_SRC } from '../constants/branding';
 
 
 interface NavItem {
@@ -30,15 +31,12 @@ export const defaultNavItems: NavItem[] = [
   { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
   { id: 'queue', to: '/queue', icon: Calendar, labelKey: 'nav.queue' },
   { id: 'stats', to: '/stats', icon: BarChart3, labelKey: 'nav.stats' },
-  { id: 'profiles', to: '/profiles', icon: Cloud, labelKey: 'nav.profiles' },
   { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
-  { id: 'projects', to: '/projects', icon: FolderKanban, labelKey: 'nav.projects' },
   { id: 'inventory', to: '/inventory', icon: Disc3, labelKey: 'nav.inventory' },
   { id: 'files', to: '/files', icon: FolderOpen, labelKey: 'nav.files' },
   { id: 'kiri-moto', to: '/kiri-moto', icon: Layers, labelKey: 'nav.orcaSlicer' },
   // User-account features: kept adjacent to Settings intentionally
   { id: 'notifications', to: '/notifications', icon: Bell, labelKey: 'nav.notifications' },
-  { id: 'settings', to: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 
 // Get unified sidebar order from localStorage
@@ -273,12 +271,9 @@ export function Layout() {
       archives: 'archives:read',
       queue: 'queue:read',
       stats: 'stats:read',
-      profiles: 'kprofiles:read',
       maintenance: 'maintenance:read',
-      projects: 'projects:read',
       inventory: 'inventory:read',
       files: 'library:read',
-      settings: 'settings:read',
       notifications: 'notifications:user_email',
     };
 
@@ -488,9 +483,9 @@ export function Layout() {
             <Menu className="w-6 h-6 text-white" />
           </button>
           <img
-            src="/img/SYSU.png"
-            alt="SYSU"
-            className="h-8 ml-3"
+            src={APP_LOGO_SRC}
+            alt={APP_LOGO_ALT}
+            className="ml-3 h-8 w-auto max-w-full object-contain"
           />
         </header>
       )}
@@ -514,9 +509,9 @@ export function Layout() {
         {/* Logo */}
         <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${isSidebarCompact || sidebarExpanded ? 'p-4' : 'p-2'}`}>
           <img
-            src="/img/SYSU.png"
-            alt="SYSU"
-            className={isSidebarCompact || sidebarExpanded ? 'h-16 w-auto' : 'h-8 w-8 object-cover object-left'}
+            src={APP_LOGO_SRC}
+            alt={APP_LOGO_ALT}
+            className={isSidebarCompact || sidebarExpanded ? 'h-16 w-auto max-w-full object-contain' : 'h-8 w-auto max-w-full object-contain'}
           />
         </div>
 

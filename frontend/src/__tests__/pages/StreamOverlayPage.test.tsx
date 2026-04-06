@@ -105,6 +105,8 @@ describe('StreamOverlayPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Printer is idle')).toBeInTheDocument();
       });
+
+      expect(document.title).toBe('SYSU·ISE');
     });
 
     it('shows SYSU logo', async () => {
@@ -113,6 +115,10 @@ describe('StreamOverlayPage', () => {
       await waitFor(() => {
         expect(screen.getByAltText('SYSU')).toBeInTheDocument();
       });
+
+      const logo = screen.getByAltText('SYSU');
+      expect(logo.className).toContain('w-auto');
+      expect(logo.className).toContain('object-contain');
     });
 
     it('logo links to GitHub', async () => {

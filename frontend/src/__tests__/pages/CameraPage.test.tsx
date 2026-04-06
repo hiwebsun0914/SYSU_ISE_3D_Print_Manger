@@ -95,6 +95,8 @@ describe('CameraPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('heading')).toBeInTheDocument();
       });
+
+      expect(document.title).toBe('SYSU·ISE');
     });
 
     it('shows live and snapshot mode buttons', async () => {

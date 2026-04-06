@@ -8,6 +8,7 @@ import { X, Mail } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
+import { APP_LOGO_ALT, APP_LOGO_SRC } from '../constants/branding';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -72,9 +73,9 @@ export function LoginPage() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src="/img/SYSU.png"
-              alt="SYSU"
-              className="h-16"
+              src={APP_LOGO_SRC}
+              alt={APP_LOGO_ALT}
+              className="h-16 w-auto max-w-full object-contain"
             />
           </div>
           <h2 className="text-3xl font-bold text-white">

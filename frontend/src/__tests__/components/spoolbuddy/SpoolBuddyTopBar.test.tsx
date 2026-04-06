@@ -53,6 +53,8 @@ describe('SpoolBuddyTopBar', () => {
     const img = screen.getByAltText('SYSU');
     expect(img).toBeDefined();
     expect(img.getAttribute('src')).toBe('/img/SYSU.png');
+    expect(img.className).toContain('w-auto');
+    expect(img.className).toContain('object-contain');
   });
 
   it('renders the printer selector', () => {

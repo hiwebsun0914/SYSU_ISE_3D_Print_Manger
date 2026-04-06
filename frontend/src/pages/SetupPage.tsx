@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Info } from 'lucide-react';
+import { APP_LOGO_ALT, APP_LOGO_SRC } from '../constants/branding';
 
 export function SetupPage() {
   const navigate = useNavigate();
@@ -77,9 +78,9 @@ export function SetupPage() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src="/img/SYSU.png"
-              alt="SYSU"
-              className="h-16"
+              src={APP_LOGO_SRC}
+              alt={APP_LOGO_ALT}
+              className="h-16 w-auto max-w-full object-contain"
             />
           </div>
           <h2 className="text-3xl font-bold text-white">

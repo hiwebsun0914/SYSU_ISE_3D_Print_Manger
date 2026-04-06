@@ -8,6 +8,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
 import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModal';
+import { APP_TITLE } from '../constants/branding';
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
@@ -44,7 +45,7 @@ export function CameraPage() {
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch printer info for the title
+  // Fetch printer info
   const { data: printer } = useQuery({
     queryKey: ['printer', id],
     queryFn: () => api.getPrinter(id),
@@ -86,13 +87,11 @@ export function CameraPage() {
 
   // Update document title
   useEffect(() => {
-    if (printer) {
-      document.title = `${printer.name} - Camera`;
-    }
+    document.title = APP_TITLE;
     return () => {
-      document.title = 'Bambuddy';
+      document.title = APP_TITLE;
     };
-  }, [printer]);
+  }, []);
 
   // Cleanup on unmount - stop the camera stream
   // Track if we've already sent the stop signal to avoid duplicate calls

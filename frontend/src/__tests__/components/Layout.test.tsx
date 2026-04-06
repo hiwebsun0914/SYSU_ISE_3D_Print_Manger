@@ -80,6 +80,17 @@ describe('Layout', () => {
         expect(links.length).toBeGreaterThan(0);
       });
     });
+
+    it('renders the SYSU logo with locked aspect ratio classes', async () => {
+      render(<Layout />);
+
+      await waitFor(() => {
+        const logo = document.querySelector('img[alt="SYSU"]');
+        expect(logo).toBeInTheDocument();
+        expect(logo?.className).toContain('w-auto');
+        expect(logo?.className).toContain('object-contain');
+      });
+    });
   });
 
   describe('navigation', () => {
@@ -93,13 +104,16 @@ describe('Layout', () => {
       });
     });
 
-    it('includes settings link', async () => {
+    it('does not include removed sidebar links', async () => {
       render(<Layout />);
 
       await waitFor(() => {
-        // Settings link should exist (route /settings)
+        const profilesLink = document.querySelector('a[href="/profiles"]');
+        const projectsLink = document.querySelector('a[href="/projects"]');
         const settingsLink = document.querySelector('a[href="/settings"]');
-        expect(settingsLink).toBeInTheDocument();
+        expect(profilesLink).not.toBeInTheDocument();
+        expect(projectsLink).not.toBeInTheDocument();
+        expect(settingsLink).not.toBeInTheDocument();
       });
     });
   });
