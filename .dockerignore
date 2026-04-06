@@ -40,7 +40,9 @@ data/
 *.db
 
 # Build artifacts
-static/
+# Keep prebuilt frontend assets for lightweight Docker builds
+!static/
+!static/**
 
 # Documentation
 docs/

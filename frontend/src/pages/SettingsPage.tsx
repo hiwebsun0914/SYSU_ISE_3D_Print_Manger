@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -768,6 +768,10 @@ export function SettingsPage() {
       Number(settings.library_disk_warning_gb ?? 5) !== Number(localSettings.library_disk_warning_gb ?? 5) ||
       (settings.camera_view_mode ?? 'window') !== (localSettings.camera_view_mode ?? 'window') ||
       (settings.preferred_slicer ?? 'bambu_studio') !== (localSettings.preferred_slicer ?? 'bambu_studio') ||
+      (settings.online_slicer_url ?? '') !== (localSettings.online_slicer_url ?? '') ||
+      (settings.online_slicer_embed ?? true) !== (localSettings.online_slicer_embed ?? true) ||
+      (settings.online_orca_slicer_url ?? '') !== (localSettings.online_orca_slicer_url ?? '') ||
+      (settings.online_orca_slicer_embed ?? true) !== (localSettings.online_orca_slicer_embed ?? true) ||
       settings.prometheus_enabled !== localSettings.prometheus_enabled ||
       settings.prometheus_token !== localSettings.prometheus_token ||
       (settings.user_notifications_enabled ?? true) !== (localSettings.user_notifications_enabled ?? true);
@@ -840,6 +844,10 @@ export function SettingsPage() {
         library_disk_warning_gb: localSettings.library_disk_warning_gb,
         camera_view_mode: localSettings.camera_view_mode,
         preferred_slicer: localSettings.preferred_slicer,
+        online_slicer_url: localSettings.online_slicer_url,
+        online_slicer_embed: localSettings.online_slicer_embed,
+        online_orca_slicer_url: localSettings.online_orca_slicer_url,
+        online_orca_slicer_embed: localSettings.online_orca_slicer_embed,
         prometheus_enabled: localSettings.prometheus_enabled,
         prometheus_token: localSettings.prometheus_token,
         user_notifications_enabled: localSettings.user_notifications_enabled,
@@ -1188,11 +1196,10 @@ export function SettingsPage() {
                 <div className="relative">
                   <select
                     value={localSettings.preferred_slicer ?? 'bambu_studio'}
-                    onChange={(e) => updateSetting('preferred_slicer', e.target.value as 'bambu_studio' | 'orcaslicer')}
+                    onChange={(e) => updateSetting('preferred_slicer', e.target.value as 'bambu_studio')}
                     className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
-                    <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
@@ -2051,6 +2058,100 @@ export function SettingsPage() {
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.externalUrlHint')}
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-bambu-green" />
+                {t('settings.slicerBambuStudio')}
+              </h2>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-bambu-gray">
+                {t('settings.onlineSlicerDescription')}
+              </p>
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  {t('settings.onlineSlicerUrl')}
+                </label>
+                <input
+                  type="text"
+                  value={localSettings.online_slicer_url ?? ''}
+                  onChange={(e) => updateSetting('online_slicer_url', e.target.value)}
+                  placeholder="http://192.168.1.100:6080/vnc.html?autoconnect=1&resize=remote"
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                />
+                <p className="text-xs text-bambu-gray mt-1">
+                  {t('settings.onlineSlicerUrlHint')}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white">{t('settings.onlineSlicerEmbed')}</p>
+                  <p className="text-sm text-bambu-gray">
+                    {t('settings.onlineSlicerEmbedDescription')}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.online_slicer_embed ?? true}
+                    onChange={(e) => updateSetting('online_slicer_embed', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-bambu-green" />
+                {t('settings.onlineOrcaSlicer')}
+              </h2>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-bambu-gray">
+                {t('settings.onlineOrcaSlicerDescription')}
+              </p>
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  {t('settings.onlineOrcaSlicerUrl')}
+                </label>
+                <input
+                  type="text"
+                  value={localSettings.online_orca_slicer_url ?? ''}
+                  onChange={(e) => updateSetting('online_orca_slicer_url', e.target.value)}
+                  placeholder="https://grid.space/kiri/"
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                />
+                <p className="text-xs text-bambu-gray mt-1">
+                  {t('settings.onlineOrcaSlicerUrlHint')}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white">{t('settings.onlineOrcaSlicerEmbed')}</p>
+                  <p className="text-sm text-bambu-gray">
+                    {t('settings.onlineOrcaSlicerEmbedDescription')}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.online_orca_slicer_embed ?? true}
+                    onChange={(e) => updateSetting('online_orca_slicer_embed', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
               </div>
             </CardContent>
           </Card>

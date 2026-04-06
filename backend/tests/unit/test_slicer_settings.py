@@ -14,10 +14,10 @@ class TestPreferredSlicerSchema:
         settings = AppSettings()
         assert settings.preferred_slicer == "bambu_studio"
 
-    def test_set_to_orcaslicer(self):
-        """Should accept orcaslicer as a valid value."""
+    def test_legacy_orcaslicer_value_is_normalized(self):
+        """Legacy OrcaSlicer values should be normalized to Bambu Studio."""
         settings = AppSettings(preferred_slicer="orcaslicer")
-        assert settings.preferred_slicer == "orcaslicer"
+        assert settings.preferred_slicer == "bambu_studio"
 
     def test_set_to_bambu_studio_explicit(self):
         """Should accept bambu_studio as an explicit value."""
@@ -30,19 +30,19 @@ class TestPreferredSlicerSchema:
         assert update.preferred_slicer is None
 
     def test_update_schema_accepts_value(self):
-        """AppSettingsUpdate should accept a preferred_slicer value."""
+        """AppSettingsUpdate should normalize legacy OrcaSlicer values."""
         update = AppSettingsUpdate(preferred_slicer="orcaslicer")
-        assert update.preferred_slicer == "orcaslicer"
+        assert update.preferred_slicer == "bambu_studio"
 
     def test_serialization_roundtrip(self):
         """Settings should survive serialization roundtrip."""
         settings = AppSettings(preferred_slicer="orcaslicer")
         data = settings.model_dump()
         restored = AppSettings(**data)
-        assert restored.preferred_slicer == "orcaslicer"
+        assert restored.preferred_slicer == "bambu_studio"
 
     def test_partial_update_preserves_other_fields(self):
         """Updating preferred_slicer should not affect other fields."""
         update = AppSettingsUpdate(preferred_slicer="orcaslicer")
         data = update.model_dump(exclude_none=True)
-        assert data == {"preferred_slicer": "orcaslicer"}
+        assert data == {"preferred_slicer": "bambu_studio"}

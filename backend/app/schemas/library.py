@@ -222,6 +222,53 @@ class FileUploadResponse(BaseModel):
     metadata: dict | None = None
 
 
+class SliceRequest(BaseModel):
+    """Schema for slicing an STL file with BambuStudio CLI."""
+
+    printer_preset_id: int
+    process_preset_id: int
+    filament_preset_id: int
+    output_filename: str | None = Field(None, min_length=1, max_length=255)
+    folder_id: int | None = None
+    arrange: bool = True
+    orient: bool = True
+
+
+class OnlineSlicerSessionCreate(BaseModel):
+    """Prepare a real BambuStudio online slicing session for a library file."""
+
+    folder_id: int | None = None
+    provider: str | None = None
+
+
+class OnlineSlicerSessionResponse(BaseModel):
+    """Session details for the remote BambuStudio UI."""
+
+    provider: str
+    session_id: str
+    source_file_id: int
+    source_filename: str
+    target_folder_id: int | None = None
+    launch_url: str
+    embed: bool
+    workspace_input_file: str
+    workspace_output_dir: str
+    download_url: str
+
+
+class OnlineSlicerImportResult(BaseModel):
+    """One imported sliced file."""
+
+    id: int
+    filename: str
+
+
+class OnlineSlicerImportResponse(BaseModel):
+    """Import result for a remote online slicer session."""
+
+    imported: list[OnlineSlicerImportResult]
+
+
 # ============ Bulk Operations ============
 
 

@@ -102,6 +102,8 @@ async def get_settings(
                 "queue_drying_enabled",
                 "queue_drying_block",
                 "ambient_drying_enabled",
+                "online_slicer_embed",
+                "online_orca_slicer_embed",
             ]:
                 settings_dict[setting.key] = setting.value.lower() == "true"
             elif setting.key in [

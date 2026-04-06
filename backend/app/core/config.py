@@ -2,8 +2,8 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Application version - single source of truth
 APP_VERSION = "0.2.2.2"
@@ -53,6 +53,12 @@ _db_path = _migrate_database()
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     app_name: str = "Bambuddy"
     debug: bool = False  # Default to production mode
 
@@ -71,6 +77,23 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api/v1"
 
+    # Headless slicing
+    bambu_studio_cli: str = "bambu-studio"
+    bambu_studio_timeout_seconds: int = 600
+    online_slicer_base_url: str = ""
+    online_slicer_embed_default: bool = True
+    online_orca_slicer_base_url: str = Field(
+        default="https://grid.space/kiri/",
+        validation_alias=AliasChoices("ONLINE_KIRI_MOTO_URL", "ONLINE_ORCA_SLICER_BASE_URL"),
+    )
+    online_orca_slicer_embed_default: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ONLINE_KIRI_MOTO_EMBED_DEFAULT", "ONLINE_ORCA_SLICER_EMBED_DEFAULT"),
+    )
+    online_slicer_workspace_dir: Path = _data_dir / "online_slicer"
+    online_slicer_mount_path: str = "/workspace/bambuddy"
+    online_slicer_session_retention_hours: int = 72
+
     @field_validator("debug", mode="before")
     @classmethod
     def normalize_debug_value(cls, value):
@@ -83,16 +106,12 @@ class Settings(BaseSettings):
                 return False
         return value
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-
 settings = Settings()
 
 # Ensure directories exist
 settings.archive_dir.mkdir(parents=True, exist_ok=True)
 settings.plate_calibration_dir.mkdir(parents=True, exist_ok=True)
 settings.static_dir.mkdir(exist_ok=True)
+settings.online_slicer_workspace_dir.mkdir(parents=True, exist_ok=True)
 if settings.log_to_file:
     settings.log_dir.mkdir(exist_ok=True)

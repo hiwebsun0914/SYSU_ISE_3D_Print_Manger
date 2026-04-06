@@ -6,13 +6,7 @@ const STATIC_CACHE = 'bambuddy-static-v25';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/img/favicon.png',
-  '/img/favicon-16x16.png',
-  '/img/favicon-32x32.png',
-  '/img/android-chrome-192x192.png',
-  '/img/android-chrome-512x512.png',
-  '/img/apple-touch-icon.png',
-  '/img/bambuddy_logo_dark.png',
+  '/img/SYSU.png',
 ];
 
 // Install event - cache static assets
@@ -169,8 +163,8 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body || 'New notification from Bambuddy',
-    icon: '/img/android-chrome-192x192.png',
-    badge: '/img/favicon-32x32.png',
+    icon: '/img/SYSU.png',
+    badge: '/img/SYSU.png',
     vibrate: [100, 50, 100],
     data: {
       url: data.url || '/',

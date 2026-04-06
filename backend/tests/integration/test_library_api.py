@@ -1,6 +1,7 @@
 """Integration tests for Library API endpoints."""
 
 import io
+import json
 import tempfile
 import zipfile
 from pathlib import Path
@@ -844,6 +845,64 @@ class TestLibraryPathHelpers:
         assert to_absolute_path(None) is None
         assert to_absolute_path("") is None
 
+    def test_build_online_slicer_launch_url_supports_request_host_placeholders(self):
+        """Verify launch URL templates can derive their host from the active request."""
+        from backend.app.api.routes.library import _build_online_slicer_launch_url
+
+        launch_url = _build_online_slicer_launch_url(
+            "{{requestScheme}}://{{requestHost}}:6081/vnc.html?autoconnect=1&resize=remote&input={{inputPathEncoded}}",
+            session_id="session-123",
+            workspace_input_file="/workspace/bambuddy/orcaslicer/sessions/session-123/input/test part.stl",
+            workspace_output_dir="/workspace/bambuddy/orcaslicer/sessions/session-123/output",
+            filename="test part.stl",
+            download_url="http://example.test/api/v1/library/files/1/dl/token/test%20part.stl",
+            request_scheme="http",
+            request_host="192.168.0.3",
+            request_port="8000",
+            request_netloc="192.168.0.3:8000",
+            request_origin="http://192.168.0.3:8000",
+        )
+
+        assert launch_url == (
+            "http://192.168.0.3:6081/vnc.html?autoconnect=1&resize=remote"
+            "&input=%2Fworkspace%2Fbambuddy%2Forcaslicer%2Fsessions%2Fsession-123%2Finput%2Ftest%20part.stl"
+        )
+
+    def test_format_url_hostname_brackets_ipv6_literals(self):
+        """Verify IPv6 literals are wrapped so templated URLs stay valid."""
+        from backend.app.api.routes.library import _format_url_hostname
+
+        assert _format_url_hostname("2001:db8::10") == "[2001:db8::10]"
+        assert _format_url_hostname("printer.local") == "printer.local"
+
+    def test_resolve_online_slicer_request_url_context_uses_external_url_for_loopback(self):
+        """Verify localhost requests can fall back to the configured external URL."""
+        from starlette.requests import Request
+
+        from backend.app.api.routes.library import _resolve_online_slicer_request_url_context
+
+        request = Request(
+            {
+                "type": "http",
+                "scheme": "http",
+                "method": "GET",
+                "path": "/api/v1/library/files/1/online-slicer/session",
+                "headers": [(b"host", b"localhost:8000")],
+                "server": ("localhost", 8000),
+                "client": ("127.0.0.1", 12345),
+            }
+        )
+
+        context = _resolve_online_slicer_request_url_context(request, "http://192.168.0.3:8000")
+
+        assert context == {
+            "request_scheme": "http",
+            "request_host": "192.168.0.3",
+            "request_port": "8000",
+            "request_netloc": "192.168.0.3:8000",
+            "request_origin": "http://192.168.0.3:8000",
+        }
+
 
 class TestLibraryPermissions:
     """Tests for library permission enforcement."""
@@ -1050,3 +1109,130 @@ class TestLibraryPermissions:
         )
         # Viewers don't have delete_own or delete_all permissions
         assert response.status_code == 403
+
+
+class TestLibrarySlicingAPI:
+    """Integration tests for online STL slicing endpoints."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_list_slicing_presets(self, async_client: AsyncClient, db_session):
+        """Verify slice preset listing groups local presets by type."""
+        from backend.app.models.local_preset import LocalPreset
+
+        db_session.add_all(
+            [
+                LocalPreset(name="Printer A", preset_type="printer", source="manual", setting=json.dumps({"name": "Printer A"})),
+                LocalPreset(name="Process A", preset_type="process", source="manual", setting=json.dumps({"name": "Process A"})),
+                LocalPreset(name="Filament A", preset_type="filament", source="manual", setting=json.dumps({"name": "Filament A"})),
+            ]
+        )
+        await db_session.commit()
+
+        response = await async_client.get("/api/v1/library/slicing/presets")
+        assert response.status_code == 200
+        result = response.json()
+        assert [p["name"] for p in result["printer"]] == ["Printer A"]
+        assert [p["name"] for p in result["process"]] == ["Process A"]
+        assert [p["name"] for p in result["filament"]] == ["Filament A"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_slice_stl_creates_sliced_library_file(self, async_client: AsyncClient, db_session, monkeypatch, tmp_path):
+        """Verify an STL can be sliced into a printable .gcode.3mf library file."""
+        from backend.app.api.routes import library as library_routes
+        from backend.app.models.library import LibraryFile
+        from backend.app.models.local_preset import LocalPreset
+
+        source_path = tmp_path / "fixture.stl"
+        source_path.write_text("solid fixture\nendsolid fixture\n", encoding="utf-8")
+
+        source_file = LibraryFile(
+            filename="fixture.stl",
+            file_path=str(source_path),
+            file_type="stl",
+            file_size=source_path.stat().st_size,
+        )
+        db_session.add(source_file)
+
+        printer = LocalPreset(
+            name="Printer A",
+            preset_type="printer",
+            source="manual",
+            setting=json.dumps({"name": "Printer A"}),
+        )
+        process = LocalPreset(
+            name="Process A",
+            preset_type="process",
+            source="manual",
+            setting=json.dumps({"name": "Process A"}),
+        )
+        filament = LocalPreset(
+            name="Filament A",
+            preset_type="filament",
+            source="manual",
+            setting=json.dumps({"name": "Filament A"}),
+        )
+        db_session.add_all([printer, process, filament])
+        await db_session.commit()
+        await db_session.refresh(source_file)
+        await db_session.refresh(printer)
+        await db_session.refresh(process)
+        await db_session.refresh(filament)
+
+        def fake_slice_stl_with_bambu_studio(**kwargs):
+            output_path = kwargs["work_dir"] / "output" / kwargs["output_filename"]
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"not-a-real-3mf")
+            return output_path
+
+        monkeypatch.setattr(library_routes, "slice_stl_with_bambu_studio", fake_slice_stl_with_bambu_studio)
+
+        response = await async_client.post(
+            f"/api/v1/library/files/{source_file.id}/slice",
+            json={
+                "printer_preset_id": printer.id,
+                "process_preset_id": process.id,
+                "filament_preset_id": filament.id,
+                "output_filename": "fixture-online-slice",
+                "arrange": True,
+                "orient": True,
+            },
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["filename"] == "fixture-online-slice.gcode.3mf"
+        assert result["file_type"] == "3mf"
+
+        created = await db_session.get(LibraryFile, result["id"])
+        assert created is not None
+        assert created.filename == "fixture-online-slice.gcode.3mf"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_slice_stl_rejects_non_stl(self, async_client: AsyncClient, db_session):
+        """Verify online slicing rejects non-STL files."""
+        from backend.app.models.library import LibraryFile
+
+        source_file = LibraryFile(
+            filename="fixture.3mf",
+            file_path="/tmp/fixture.3mf",
+            file_type="3mf",
+            file_size=12,
+        )
+        db_session.add(source_file)
+        await db_session.commit()
+        await db_session.refresh(source_file)
+
+        response = await async_client.post(
+            f"/api/v1/library/files/{source_file.id}/slice",
+            json={
+                "printer_preset_id": 1,
+                "process_preset_id": 2,
+                "filament_preset_id": 3,
+            },
+        )
+
+        assert response.status_code == 400
+        assert "only stl files" in response.json()["detail"].lower()

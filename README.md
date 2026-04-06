@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/img/bambuddy_logo_dark.png" alt="Bambuddy Logo" width="300">
+  <img src="static/img/SYSU.png" alt="SYSU Logo" width="300">
 </p>
 
 <h1 align="center">Bambuddy</h1>
@@ -126,6 +126,7 @@ Perfect for remote print farms, traveling makers, or accessing your home printer
 
 ### 📁 File Manager (Library)
 - Upload and organize sliced files (3MF, gcode, STL)
+- **Online BambuStudio / Kiri:Moto slicing** - Open BambuStudio or Kiri:Moto in the browser, tune parameters, then bring the generated files back into the library
 - **External folder mounting** - Mount host directories (NAS, USB, network shares) without copying files
 - **STL thumbnail generation** - Auto-generate previews for STL files on upload or batch generate for existing files
 - ZIP file extraction with folder structure preservation
@@ -179,7 +180,6 @@ Perfect for remote print farms, traveling makers, or accessing your home printer
 - MQTT publishing for Home Assistant, Node-RED, etc.
 - **Prometheus metrics** - Export printer telemetry for Grafana dashboards
 - Bambu Cloud profile management
-- **Local Profiles** - Import OrcaSlicer presets (`.orca_filament`, `.bbscfg`, `.bbsflmt`, `.zip`, `.json`) without Bambu Cloud
 - K-profiles (pressure advance)
 - **GitHub backup** - Schedule automatic backups of cloud profiles, k profiles and settings to GitHub
 - External sidebar links
@@ -226,7 +226,7 @@ Perfect for remote print farms, traveling makers, or accessing your home printer
 </tr>
 </table>
 
-**Plus:** Configurable slicer (Bambu Studio / OrcaSlicer) • Customizable themes (style, background, accent) • Mobile responsive • Keyboard shortcuts • Multi-language (EN/DE/JA/IT) • Auto updates • Database backup/restore • System info dashboard
+**Plus:** Configurable slicer workflow (Bambu Studio / Kiri:Moto) • Customizable themes (style, background, accent) • Mobile responsive • Keyboard shortcuts • Multi-language (EN/DE/JA/IT) • Auto updates • Database backup/restore • System info dashboard
 
 ---
 
@@ -397,6 +397,32 @@ docker compose up -d --build
 ```
 
 Open **http://localhost:8000** in your browser.
+
+#### Optional: Real BambuStudio / Kiri:Moto Online Slicing
+
+When running from a full source checkout, the bundled `docker-compose.yml` can start an optional noVNC-backed BambuStudio container, while Kiri:Moto uses its normal web app directly:
+
+- `bambu_studio_web` on port `6080`
+
+To make the in-app online slicer entries work from another device on your LAN, set the matching base URL before starting:
+
+```bash
+export ONLINE_SLICER_BASE_URL="http://YOUR-SERVER-IP:6080/vnc.html?autoconnect=1&resize=remote"
+export ONLINE_KIRI_MOTO_URL="https://grid.space/kiri/"
+```
+
+Start BambuStudio only when you need the remote desktop UI:
+
+```bash
+docker compose --profile bambu-slicer up -d --build
+```
+
+Then in Bambuddy:
+
+1. Open **Settings → Network** and confirm the Bambu Studio / Kiri:Moto URL you want to use
+2. Click **Kiri:Moto** in the sidebar for a manual session, or use **File Manager → Online Slice** on an STL file to preload a model
+3. Kiri:Moto opens directly in the browser and loads the STL automatically when launched from File Manager
+4. Export the sliced file from Kiri:Moto and upload it back into Bambuddy if you want it stored in the library
 
 > **Multi-architecture support:** Pre-built images are available for `linux/amd64` and `linux/arm64` (Raspberry Pi 4/5).
 

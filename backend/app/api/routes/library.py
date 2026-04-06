@@ -3,21 +3,26 @@
 import base64
 import binascii
 import hashlib
+import json
 import logging
 import os
 import re
 import shutil
+import tempfile
 import uuid
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.auth import (
+    create_slicer_download_token,
     require_ownership_permission,
     require_permission_if_auth_enabled,
 )
@@ -26,9 +31,12 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile, LibraryFolder
+from backend.app.models.local_preset import LocalPreset
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.project import Project
+from backend.app.models.settings import Settings as SettingsRecord
 from backend.app.models.user import User
+from backend.app.schemas.local_preset import LocalPresetResponse, LocalPresetsResponse
 from backend.app.schemas.library import (
     AddToQueueError,
     AddToQueueRequest,
@@ -51,17 +59,29 @@ from backend.app.schemas.library import (
     FolderResponse,
     FolderTreeItem,
     FolderUpdate,
+    OnlineSlicerImportResponse,
+    OnlineSlicerImportResult,
+    OnlineSlicerSessionCreate,
+    OnlineSlicerSessionResponse,
+    SliceRequest,
     ZipExtractError,
     ZipExtractResponse,
     ZipExtractResult,
 )
 from backend.app.services.archive import ThreeMFParser
+from backend.app.services.bambu_studio_slicer import (
+    BambuStudioSliceError,
+    BambuStudioUnavailableError,
+    slice_stl_with_bambu_studio,
+)
 from backend.app.services.stl_thumbnail import generate_stl_thumbnail
 from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+ONLINE_SLICER_PROVIDERS = {"bambu_studio", "orcaslicer"}
 
 
 def get_library_dir() -> Path:
@@ -86,6 +106,35 @@ def get_library_thumbnails_dir() -> Path:
     return thumbnails_dir
 
 
+def _normalize_online_slicer_provider(provider: str | None) -> str:
+    """Normalize provider names to the internal routing keys."""
+    value = (provider or "bambu_studio").strip().lower()
+    if value not in ONLINE_SLICER_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unsupported slicer provider: {provider}")
+    return value
+
+
+def get_online_slicer_workspace_dir(provider: str) -> Path:
+    """Get the shared workspace used by the selected remote slicer UI."""
+    workspace_dir = Path(app_settings.online_slicer_workspace_dir) / _normalize_online_slicer_provider(provider)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    return workspace_dir
+
+
+def get_online_slicer_sessions_dir(provider: str) -> Path:
+    """Get the per-session workspace root."""
+    sessions_dir = get_online_slicer_workspace_dir(provider) / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    return sessions_dir
+
+
+def get_online_slicer_requests_dir(provider: str) -> Path:
+    """Get the request handoff directory watched by the remote slicer container."""
+    requests_dir = get_online_slicer_workspace_dir(provider) / "requests"
+    requests_dir.mkdir(parents=True, exist_ok=True)
+    return requests_dir
+
+
 def to_relative_path(absolute_path: Path | str) -> str:
     """Convert an absolute path to a path relative to base_dir for storage."""
     if not absolute_path:
@@ -108,6 +157,192 @@ def to_absolute_path(relative_path: str | None) -> Path | None:
     if path.is_absolute():
         return path
     return Path(app_settings.base_dir) / relative_path
+
+
+async def _get_app_setting(db: AsyncSession, key: str) -> str | None:
+    """Read a raw app setting from the key-value table."""
+    result = await db.execute(select(SettingsRecord.value).where(SettingsRecord.key == key))
+    return result.scalar_one_or_none()
+
+
+async def _get_online_slicer_launch_url(db: AsyncSession, provider: str) -> str:
+    """Resolve the configured remote slicer URL from DB or environment defaults."""
+    provider = _normalize_online_slicer_provider(provider)
+    if provider == "orcaslicer":
+        stored = await _get_app_setting(db, "online_orca_slicer_url")
+        if stored is not None:
+            return stored.strip()
+        return app_settings.online_orca_slicer_base_url.strip()
+
+    stored = await _get_app_setting(db, "online_slicer_url")
+    if stored is not None:
+        return stored.strip()
+    return app_settings.online_slicer_base_url.strip()
+
+
+async def _get_online_slicer_embed(db: AsyncSession, provider: str) -> bool:
+    """Resolve whether the remote slicer should be embedded in an iframe."""
+    provider = _normalize_online_slicer_provider(provider)
+    if provider == "orcaslicer":
+        stored = await _get_app_setting(db, "online_orca_slicer_embed")
+        if stored is None:
+            return bool(app_settings.online_orca_slicer_embed_default)
+        return stored.strip().lower() == "true"
+
+    stored = await _get_app_setting(db, "online_slicer_embed")
+    if stored is None:
+        return bool(app_settings.online_slicer_embed_default)
+    return stored.strip().lower() == "true"
+
+
+def _iter_online_slicer_provider_dirs() -> list[tuple[str, Path]]:
+    """Return provider workspace roots for housekeeping and session lookup."""
+    return [(provider, get_online_slicer_workspace_dir(provider)) for provider in sorted(ONLINE_SLICER_PROVIDERS)]
+
+
+def _find_online_slicer_session_dir(session_id: str) -> tuple[str, Path]:
+    """Locate a session directory regardless of which slicer provider created it."""
+    if not re.fullmatch(r"[A-Fa-f0-9-]{8,64}", session_id):
+        raise HTTPException(status_code=400, detail="Invalid online slicer session ID")
+
+    for provider, _workspace_dir in _iter_online_slicer_provider_dirs():
+        session_dir = get_online_slicer_sessions_dir(provider) / session_id
+        if session_dir.exists():
+            return provider, session_dir
+
+    raise HTTPException(status_code=404, detail="Online slicer session not found")
+
+
+def _get_online_slicer_mount_root(provider: str) -> str:
+    """Build the in-container mount root for a provider-specific slicer workspace."""
+    provider = _normalize_online_slicer_provider(provider)
+    return f"{app_settings.online_slicer_mount_path.rstrip('/')}/{provider}"
+
+
+def _get_online_slicer_label(provider: str) -> str:
+    """Human-friendly provider label for messages and manifests."""
+    provider = _normalize_online_slicer_provider(provider)
+    return "OrcaSlicer" if provider == "orcaslicer" else "BambuStudio"
+
+
+def _cleanup_stale_online_slicer_sessions() -> None:
+    """Remove old online slicer sessions so the shared workspace doesn't grow forever."""
+    retention_hours = max(1, int(app_settings.online_slicer_session_retention_hours))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+
+    for provider, _workspace_dir in _iter_online_slicer_provider_dirs():
+        for session_dir in get_online_slicer_sessions_dir(provider).iterdir():
+            try:
+                if not session_dir.is_dir():
+                    continue
+                modified_at = datetime.fromtimestamp(session_dir.stat().st_mtime, tz=timezone.utc)
+                if modified_at < cutoff:
+                    shutil.rmtree(session_dir, ignore_errors=True)
+            except OSError:
+                logger.warning("Failed to clean stale online slicer session: %s", session_dir)
+
+        for request_file in get_online_slicer_requests_dir(provider).glob("*.json"):
+            try:
+                modified_at = datetime.fromtimestamp(request_file.stat().st_mtime, tz=timezone.utc)
+                if modified_at < cutoff:
+                    request_file.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to clean stale online slicer request: %s", request_file)
+
+
+def _sanitize_online_slicer_filename(filename: str) -> str:
+    """Make a filename safe for the shared online slicer workspace."""
+    name = Path(filename).name.strip() or "model"
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", name)
+    safe = safe.lstrip(".").strip() or "model"
+    return safe
+
+
+def _format_url_hostname(hostname: str) -> str:
+    """Bracket IPv6 literals so they can be safely used inside URLs."""
+    if ":" in hostname and not hostname.startswith("["):
+        return f"[{hostname}]"
+    return hostname
+
+
+def _is_loopback_hostname(hostname: str) -> bool:
+    """Identify request hosts that only work locally in the current browser."""
+    normalized = hostname.strip().lower().strip("[]")
+    return normalized in {"localhost", "127.0.0.1", "::1"}
+
+
+def _resolve_online_slicer_request_url_context(request: Request, external_url: str = "") -> dict[str, str]:
+    """Build request URL placeholders, preferring an explicit external URL over loopback hosts."""
+    request_scheme = request.url.scheme
+    request_hostname = request.url.hostname or ""
+    request_port = str(request.url.port or "")
+    request_netloc = request.headers.get("host", "")
+    request_origin = str(request.base_url).rstrip("/")
+
+    if _is_loopback_hostname(request_hostname) and external_url.strip():
+        parsed = urlparse(external_url.strip())
+        if parsed.scheme and parsed.hostname:
+            request_scheme = parsed.scheme
+            request_hostname = parsed.hostname
+            request_port = str(parsed.port or "")
+            request_netloc = parsed.netloc
+            request_origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    return {
+        "request_scheme": request_scheme,
+        "request_host": _format_url_hostname(request_hostname),
+        "request_port": request_port,
+        "request_netloc": request_netloc,
+        "request_origin": request_origin,
+    }
+
+
+def _build_online_slicer_launch_url(
+    template: str,
+    *,
+    session_id: str,
+    workspace_input_file: str,
+    workspace_output_dir: str,
+    filename: str,
+    download_url: str,
+    request_scheme: str = "",
+    request_host: str = "",
+    request_port: str = "",
+    request_netloc: str = "",
+    request_origin: str = "",
+) -> str:
+    """Apply optional placeholders to the configured online slicer URL."""
+    replacements = {
+        "sessionId": session_id,
+        "inputPath": workspace_input_file,
+        "outputPath": workspace_output_dir,
+        "filename": filename,
+        "downloadUrl": download_url,
+        "requestScheme": request_scheme,
+        "requestHost": request_host,
+        "requestPort": request_port,
+        "requestNetloc": request_netloc,
+        "requestOrigin": request_origin,
+    }
+
+    url = template
+    for key, value in replacements.items():
+        url = url.replace(f"{{{{{key}}}}}", value)
+        url = url.replace(f"{{{{{key}Encoded}}}}", quote(value, safe=""))
+    return url
+
+
+def _is_online_slicer_importable_file(filename: str) -> bool:
+    """Accept the printable files users typically export from BambuStudio or OrcaSlicer."""
+    lower = filename.lower()
+    return lower.endswith(".gcode") or lower.endswith(".gcode.3mf")
+
+
+def _storage_name_for_output_file(filename: str) -> str:
+    """Preserve compound extensions like .gcode.3mf in internal storage."""
+    suffixes = Path(filename).suffixes
+    compound = "".join(suffixes[-2:]) if len(suffixes) >= 2 else "".join(suffixes)
+    return f"{uuid.uuid4().hex}{compound.lower() or '.dat'}"
 
 
 def calculate_file_hash(file_path: Path) -> str:
@@ -235,7 +470,243 @@ def create_image_thumbnail(file_path: Path, thumbnails_dir: Path, max_size: int 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
 
 
+def _clean_threemf_metadata(raw_metadata: dict) -> dict:
+    """Remove non-serializable fields from parsed 3MF metadata."""
+
+    def clean(obj):
+        if isinstance(obj, dict):
+            return {
+                key: clean(value)
+                for key, value in obj.items()
+                if not isinstance(value, bytes) and key not in ("_thumbnail_data", "_thumbnail_ext")
+            }
+        if isinstance(obj, list):
+            return [clean(item) for item in obj if not isinstance(item, bytes)]
+        if isinstance(obj, bytes):
+            return None
+        return obj
+
+    return clean(raw_metadata)
+
+
+async def _validate_library_target_folder(
+    db: AsyncSession,
+    folder_id: int | None,
+    *,
+    not_found_detail: str = "Folder not found",
+) -> LibraryFolder | None:
+    """Ensure a destination folder exists and accepts uploads."""
+    if folder_id is None:
+        return None
+
+    folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+    target_folder = folder_result.scalar_one_or_none()
+    if not target_folder:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+
+    if target_folder.is_external and target_folder.external_readonly:
+        raise HTTPException(status_code=403, detail="Cannot upload to a read-only external folder")
+
+    return target_folder
+
+
+async def _get_local_preset_setting(
+    db: AsyncSession,
+    preset_id: int,
+    expected_type: str,
+) -> dict:
+    """Load a resolved local preset JSON blob."""
+    result = await db.execute(select(LocalPreset).where(LocalPreset.id == preset_id))
+    preset = result.scalar_one_or_none()
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Local {expected_type} preset not found")
+    if preset.preset_type != expected_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Preset '{preset.name}' is not a {expected_type} preset",
+        )
+
+    try:
+        setting = json.loads(preset.setting)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Local {expected_type} preset '{preset.name}' is invalid JSON",
+        ) from exc
+
+    if not isinstance(setting, dict):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Local {expected_type} preset '{preset.name}' is not an object",
+        )
+
+    return setting
+
+
+def _extract_library_file_artifacts(
+    file_path: Path,
+    *,
+    generate_stl_thumbnails: bool = True,
+) -> tuple[str, dict | None, str | None]:
+    """Extract metadata and thumbnails for a library file already stored on disk."""
+    ext = os.path.splitext(file_path.name)[1].lower()
+    file_type = ext[1:] if ext else "unknown"
+    metadata: dict | None = None
+    thumbnail_path: str | None = None
+    thumbnails_dir = get_library_thumbnails_dir()
+
+    if ext == ".3mf":
+        try:
+            parser = ThreeMFParser(str(file_path))
+            raw_metadata = parser.parse()
+
+            thumbnail_data = raw_metadata.get("_thumbnail_data")
+            thumbnail_ext = raw_metadata.get("_thumbnail_ext", ".png")
+
+            if thumbnail_data:
+                thumb_filename = f"{uuid.uuid4().hex}{thumbnail_ext}"
+                thumb_full_path = thumbnails_dir / thumb_filename
+                with open(thumb_full_path, "wb") as f:
+                    f.write(thumbnail_data)
+                thumbnail_path = to_relative_path(thumb_full_path)
+
+            cleaned = _clean_threemf_metadata(raw_metadata)
+            metadata = cleaned if cleaned else None
+        except Exception as e:
+            logger.warning("Failed to parse 3MF: %s", e)
+
+    elif ext == ".gcode":
+        try:
+            thumbnail_data = extract_gcode_thumbnail(file_path)
+            if thumbnail_data:
+                thumb_filename = f"{uuid.uuid4().hex}.png"
+                thumb_full_path = thumbnails_dir / thumb_filename
+                with open(thumb_full_path, "wb") as f:
+                    f.write(thumbnail_data)
+                thumbnail_path = to_relative_path(thumb_full_path)
+        except Exception as e:
+            logger.warning("Failed to extract gcode thumbnail: %s", e)
+
+    elif ext.lower() in IMAGE_EXTENSIONS:
+        thumbnail_path_str = create_image_thumbnail(file_path, thumbnails_dir)
+        if thumbnail_path_str:
+            thumbnail_path = to_relative_path(Path(thumbnail_path_str))
+
+    elif ext == ".stl" and generate_stl_thumbnails:
+        generated_thumbnail = generate_stl_thumbnail(file_path, thumbnails_dir)
+        if generated_thumbnail:
+            thumbnail_path = to_relative_path(Path(generated_thumbnail))
+
+    return file_type, metadata, thumbnail_path
+
+
+async def _create_library_file_entry(
+    *,
+    file_path: Path,
+    filename: str,
+    folder_id: int | None,
+    db: AsyncSession,
+    current_user: User | None,
+    generate_stl_thumbnails: bool = True,
+) -> tuple[LibraryFile, int | None]:
+    """Create a library DB record for a file already stored on disk."""
+    file_hash = calculate_file_hash(file_path)
+
+    dup_result = await db.execute(select(LibraryFile.id).where(LibraryFile.file_hash == file_hash).limit(1))
+    duplicate_of = dup_result.scalar()
+
+    file_type, metadata, thumbnail_path = _extract_library_file_artifacts(
+        file_path,
+        generate_stl_thumbnails=generate_stl_thumbnails,
+    )
+
+    library_file = LibraryFile(
+        folder_id=folder_id,
+        filename=filename,
+        file_path=to_relative_path(file_path),
+        file_type=file_type,
+        file_size=file_path.stat().st_size,
+        file_hash=file_hash,
+        thumbnail_path=thumbnail_path,
+        file_metadata=metadata,
+        created_by_id=current_user.id if current_user else None,
+    )
+    db.add(library_file)
+
+    try:
+        await db.commit()
+        await db.refresh(library_file)
+    except Exception:
+        await db.rollback()
+        if thumbnail_path:
+            abs_thumb_path = to_absolute_path(thumbnail_path)
+            if abs_thumb_path and abs_thumb_path.exists():
+                try:
+                    abs_thumb_path.unlink()
+                except OSError:
+                    logger.warning("Failed to clean up thumbnail after DB error: %s", abs_thumb_path)
+        raise
+
+    return library_file, duplicate_of
+
+
+def _normalize_sliced_output_filename(value: str) -> str:
+    """Normalize user-provided output names to printable .gcode.3mf files."""
+    filename = value.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="Output filename is required")
+    if "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Output filename cannot contain path separators")
+
+    base_name = re.sub(r"(\.gcode\.3mf|\.3mf|\.gcode|\.stl)$", "", filename, flags=re.IGNORECASE).strip()
+    if not base_name:
+        raise HTTPException(status_code=400, detail="Output filename is invalid")
+
+    return f"{base_name}.gcode.3mf"
+
+
+def _get_online_slicer_session_manifest(session_id: str) -> dict:
+    """Load session metadata written when the file was handed off to an online slicer."""
+    _provider, session_dir = _find_online_slicer_session_dir(session_id)
+    manifest_path = session_dir / "session.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="Online slicer session not found")
+
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Online slicer session metadata is unreadable") from exc
+
+    if not isinstance(manifest, dict):
+        raise HTTPException(status_code=500, detail="Online slicer session metadata is invalid")
+
+    return manifest
+
+
 # ============ Folder Endpoints ============
+
+
+@router.get("/slicing/presets", response_model=LocalPresetsResponse)
+async def list_slicing_presets(
+    db: AsyncSession = Depends(get_db),
+    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+):
+    """List local presets available for server-side slicing."""
+    result = await db.execute(select(LocalPreset).order_by(LocalPreset.name))
+    presets = result.scalars().all()
+
+    grouped = LocalPresetsResponse()
+    for preset in presets:
+        response = LocalPresetResponse.model_validate(preset)
+        if preset.preset_type == "filament":
+            grouped.filament.append(response)
+        elif preset.preset_type == "printer":
+            grouped.printer.append(response)
+        elif preset.preset_type == "process":
+            grouped.process.append(response)
+
+    return grouped
 
 
 @router.get("/folders", response_model=list[FolderTreeItem])
@@ -1002,117 +1473,31 @@ async def upload_file(
     current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
 ):
     """Upload a file to the library."""
+    stored_file_path: Path | None = None
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
 
         filename = file.filename
         ext = os.path.splitext(filename)[1].lower()
-        # Handle files without extension
-        file_type = ext[1:] if ext else "unknown"
-
-        # Verify folder exists if specified
-        if folder_id is not None:
-            folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
-            target_folder = folder_result.scalar_one_or_none()
-            if not target_folder:
-                raise HTTPException(status_code=404, detail="Folder not found")
-            if target_folder.is_external and target_folder.external_readonly:
-                raise HTTPException(status_code=403, detail="Cannot upload to a read-only external folder")
+        await _validate_library_target_folder(db, folder_id)
 
         # Generate unique filename for storage
         unique_filename = f"{uuid.uuid4().hex}{ext}"
-        file_path = get_library_files_dir() / unique_filename
+        stored_file_path = get_library_files_dir() / unique_filename
 
         # Save file
         content = await file.read()
-        with open(file_path, "wb") as f:
+        with open(stored_file_path, "wb") as f:
             f.write(content)
-
-        # Calculate hash
-        file_hash = calculate_file_hash(file_path)
-
-        # Check for duplicates
-        dup_result = await db.execute(select(LibraryFile.id).where(LibraryFile.file_hash == file_hash).limit(1))
-        duplicate_of = dup_result.scalar()
-
-        # Extract metadata and thumbnail
-        metadata = {}
-        thumbnail_path = None
-        thumbnails_dir = get_library_thumbnails_dir()
-
-        if ext == ".3mf":
-            try:
-                parser = ThreeMFParser(str(file_path))
-                raw_metadata = parser.parse()
-
-                # Extract thumbnail before cleaning metadata
-                thumbnail_data = raw_metadata.get("_thumbnail_data")
-                thumbnail_ext = raw_metadata.get("_thumbnail_ext", ".png")
-
-                # Save thumbnail if extracted
-                if thumbnail_data:
-                    thumb_filename = f"{uuid.uuid4().hex}{thumbnail_ext}"
-                    thumb_path = thumbnails_dir / thumb_filename
-                    with open(thumb_path, "wb") as f:
-                        f.write(thumbnail_data)
-                    thumbnail_path = str(thumb_path)
-
-                # Clean metadata - remove non-JSON-serializable data (bytes, etc.)
-                def clean_metadata(obj):
-                    if isinstance(obj, dict):
-                        return {
-                            k: clean_metadata(v)
-                            for k, v in obj.items()
-                            if not isinstance(v, bytes) and k not in ("_thumbnail_data", "_thumbnail_ext")
-                        }
-                    elif isinstance(obj, list):
-                        return [clean_metadata(i) for i in obj if not isinstance(i, bytes)]
-                    elif isinstance(obj, bytes):
-                        return None
-                    return obj
-
-                metadata = clean_metadata(raw_metadata)
-            except Exception as e:
-                logger.warning("Failed to parse 3MF: %s", e)
-
-        elif ext == ".gcode":
-            # Extract embedded thumbnail from gcode
-            try:
-                thumbnail_data = extract_gcode_thumbnail(file_path)
-                if thumbnail_data:
-                    thumb_filename = f"{uuid.uuid4().hex}.png"
-                    thumb_path = thumbnails_dir / thumb_filename
-                    with open(thumb_path, "wb") as f:
-                        f.write(thumbnail_data)
-                    thumbnail_path = str(thumb_path)
-            except Exception as e:
-                logger.warning("Failed to extract gcode thumbnail: %s", e)
-
-        elif ext.lower() in IMAGE_EXTENSIONS:
-            # For image files, create a thumbnail from the image itself
-            thumbnail_path = create_image_thumbnail(file_path, thumbnails_dir)
-
-        elif ext == ".stl":
-            # Generate STL thumbnail if enabled
-            if generate_stl_thumbnails:
-                thumbnail_path = generate_stl_thumbnail(file_path, thumbnails_dir)
-
-        # Create database entry (store relative paths for portability)
-        library_file = LibraryFile(
-            folder_id=folder_id,
+        library_file, duplicate_of = await _create_library_file_entry(
+            file_path=stored_file_path,
             filename=filename,
-            file_path=to_relative_path(file_path),
-            file_type=file_type,
-            file_size=len(content),
-            file_hash=file_hash,
-            thumbnail_path=to_relative_path(thumbnail_path) if thumbnail_path else None,
-            file_metadata=metadata if metadata else None,
-            created_by_id=current_user.id if current_user else None,
+            folder_id=folder_id,
+            db=db,
+            current_user=current_user,
+            generate_stl_thumbnails=generate_stl_thumbnails,
         )
-        db.add(library_file)
-        await db.commit()
-        await db.refresh(library_file)
 
         return FileUploadResponse(
             id=library_file.id,
@@ -1126,8 +1511,297 @@ async def upload_file(
     except HTTPException:
         raise
     except Exception as e:
+        if stored_file_path and stored_file_path.exists():
+            try:
+                stored_file_path.unlink()
+            except OSError:
+                logger.warning("Failed to clean up upload file after error: %s", stored_file_path)
         logger.error("Upload failed for %s: %s", file.filename, e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/files/{file_id}/slice", response_model=FileUploadResponse)
+async def slice_library_file(
+    file_id: int,
+    body: SliceRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_READ)),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+):
+    """Slice an STL file with BambuStudio CLI and save the output in the library."""
+    result = await db.execute(select(LibraryFile).where(LibraryFile.id == file_id))
+    source_file = result.scalar_one_or_none()
+    if not source_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if source_file.file_type != "stl" and not source_file.filename.lower().endswith(".stl"):
+        raise HTTPException(status_code=400, detail="Only STL files can be sliced online")
+
+    source_path = to_absolute_path(source_file.file_path)
+    if not source_path or not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source STL file not found on disk")
+
+    target_folder_id = body.folder_id
+    if target_folder_id is None:
+        target_folder_id = source_file.folder_id
+        if target_folder_id is not None:
+            folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == target_folder_id))
+            source_folder = folder_result.scalar_one_or_none()
+            if source_folder and source_folder.is_external and source_folder.external_readonly:
+                target_folder_id = None
+
+    await _validate_library_target_folder(db, target_folder_id)
+
+    printer_setting = await _get_local_preset_setting(db, body.printer_preset_id, "printer")
+    process_setting = await _get_local_preset_setting(db, body.process_preset_id, "process")
+    filament_setting = await _get_local_preset_setting(db, body.filament_preset_id, "filament")
+
+    output_filename = _normalize_sliced_output_filename(body.output_filename or source_file.filename)
+
+    storage_path: Path | None = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="bambuddy_slice_") as tmp_dir:
+            work_dir = Path(tmp_dir)
+            sliced_path = slice_stl_with_bambu_studio(
+                source_file=source_path,
+                printer_preset=printer_setting,
+                process_preset=process_setting,
+                filament_preset=filament_setting,
+                output_filename=output_filename,
+                work_dir=work_dir,
+                arrange=body.arrange,
+                orient=body.orient,
+            )
+
+            storage_path = get_library_files_dir() / f"{uuid.uuid4().hex}{sliced_path.suffix.lower() or '.3mf'}"
+            shutil.move(sliced_path, storage_path)
+
+        library_file, duplicate_of = await _create_library_file_entry(
+            file_path=storage_path,
+            filename=output_filename,
+            folder_id=target_folder_id,
+            db=db,
+            current_user=current_user,
+        )
+    except BambuStudioUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BambuStudioSliceError as exc:
+        if storage_path and storage_path.exists():
+            try:
+                storage_path.unlink()
+            except OSError:
+                logger.warning("Failed to clean up sliced file after error: %s", storage_path)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except HTTPException:
+        if storage_path and storage_path.exists():
+            try:
+                storage_path.unlink()
+            except OSError:
+                logger.warning("Failed to clean up sliced file after HTTP error: %s", storage_path)
+        raise
+    except Exception as exc:
+        if storage_path and storage_path.exists():
+            try:
+                storage_path.unlink()
+            except OSError:
+                logger.warning("Failed to clean up sliced file after error: %s", storage_path)
+        logger.error("Online slicing failed for %s: %s", source_file.filename, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Online slicing failed: {str(exc)}") from exc
+
+    return FileUploadResponse(
+        id=library_file.id,
+        filename=library_file.filename,
+        file_type=library_file.file_type,
+        file_size=library_file.file_size,
+        thumbnail_path=library_file.thumbnail_path,
+        duplicate_of=duplicate_of,
+        metadata=library_file.file_metadata,
+    )
+
+
+@router.post("/files/{file_id}/online-slicer/session", response_model=OnlineSlicerSessionResponse)
+async def create_online_slicer_session(
+    file_id: int,
+    body: OnlineSlicerSessionCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_READ)),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+):
+    """Prepare a real slicer browser session by mirroring the source file into a shared workspace."""
+    provider = _normalize_online_slicer_provider(body.provider)
+    launch_template = await _get_online_slicer_launch_url(db, provider)
+    external_url = (await _get_app_setting(db, "external_url") or os.environ.get("APP_URL", "")).strip()
+    if not launch_template:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{_get_online_slicer_label(provider)} is not configured. "
+                "Set the corresponding online slicer URL in Settings or via environment variables."
+            ),
+        )
+
+    result = await db.execute(select(LibraryFile).where(LibraryFile.id == file_id))
+    source_file = result.scalar_one_or_none()
+    if not source_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    lower_name = source_file.filename.lower()
+    if source_file.file_type not in {"stl", "3mf"} and not (lower_name.endswith(".stl") or lower_name.endswith(".3mf")):
+        raise HTTPException(status_code=400, detail="Only STL or 3MF files can be opened in the online slicer")
+
+    source_path = to_absolute_path(source_file.file_path)
+    if not source_path or not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source file not found on disk")
+
+    target_folder_id = body.folder_id
+    if target_folder_id is None:
+        target_folder_id = source_file.folder_id
+        if target_folder_id is not None:
+            folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == target_folder_id))
+            source_folder = folder_result.scalar_one_or_none()
+            if source_folder and source_folder.is_external and source_folder.external_readonly:
+                target_folder_id = None
+
+    await _validate_library_target_folder(db, target_folder_id)
+
+    _cleanup_stale_online_slicer_sessions()
+
+    session_id = uuid.uuid4().hex
+    session_dir = get_online_slicer_sessions_dir(provider) / session_id
+    input_dir = session_dir / "input"
+    output_dir = session_dir / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    mirrored_filename = _sanitize_online_slicer_filename(source_file.filename)
+    mirrored_input_path = input_dir / mirrored_filename
+
+    try:
+        shutil.copy2(source_path, mirrored_input_path)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to prepare online slicer workspace: {exc}") from exc
+
+    workspace_mount_path = _get_online_slicer_mount_root(provider)
+    workspace_input_file = f"{workspace_mount_path}/sessions/{session_id}/input/{mirrored_filename}"
+    workspace_output_dir = f"{workspace_mount_path}/sessions/{session_id}/output"
+
+    token = create_slicer_download_token("library", file_id)
+    quoted_filename = quote(source_file.filename, safe="")
+    download_url = (
+        f"{str(request.base_url).rstrip('/')}{app_settings.api_prefix}"
+        f"/library/files/{file_id}/dl/{token}/{quoted_filename}"
+    )
+
+    manifest = {
+        "provider": provider,
+        "session_id": session_id,
+        "source_file_id": source_file.id,
+        "source_filename": source_file.filename,
+        "target_folder_id": target_folder_id,
+        "workspace_input_file": workspace_input_file,
+        "workspace_output_dir": workspace_output_dir,
+        "download_url": download_url,
+        "created_by_id": current_user.id if current_user else None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    for manifest_path in (session_dir / "session.json", get_online_slicer_requests_dir(provider) / f"{session_id}.json"):
+        try:
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=True, indent=2)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to write online slicer request: {exc}") from exc
+
+    request_url_context = _resolve_online_slicer_request_url_context(request, external_url)
+    launch_url = _build_online_slicer_launch_url(
+        launch_template,
+        session_id=session_id,
+        workspace_input_file=workspace_input_file,
+        workspace_output_dir=workspace_output_dir,
+        filename=source_file.filename,
+        download_url=download_url,
+        **request_url_context,
+    )
+
+    return OnlineSlicerSessionResponse(
+        provider=provider,
+        session_id=session_id,
+        source_file_id=source_file.id,
+        source_filename=source_file.filename,
+        target_folder_id=target_folder_id,
+        launch_url=launch_url,
+        embed=await _get_online_slicer_embed(db, provider),
+        workspace_input_file=workspace_input_file,
+        workspace_output_dir=workspace_output_dir,
+        download_url=download_url,
+    )
+
+
+@router.post("/online-slicer/sessions/{session_id}/import", response_model=OnlineSlicerImportResponse)
+async def import_online_slicer_outputs(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+):
+    """Import newly exported sliced files from a remote online slicer session back into the library."""
+    manifest = _get_online_slicer_session_manifest(session_id)
+    target_folder_id = manifest.get("target_folder_id")
+    await _validate_library_target_folder(db, target_folder_id)
+
+    _provider, session_dir = _find_online_slicer_session_dir(session_id)
+    output_dir = session_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    imported_index_path = session_dir / "imported.json"
+    imported_rel_paths: set[str] = set()
+    if imported_index_path.exists():
+        try:
+            with open(imported_index_path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                imported_rel_paths = {str(item) for item in data}
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Failed to read imported online slicer index: %s", imported_index_path)
+
+    imported: list[OnlineSlicerImportResult] = []
+    for output_file in sorted(output_dir.rglob("*")):
+        if not output_file.is_file() or not _is_online_slicer_importable_file(output_file.name):
+            continue
+
+        rel_path = str(output_file.relative_to(output_dir))
+        if rel_path in imported_rel_paths:
+            continue
+
+        storage_path = get_library_files_dir() / _storage_name_for_output_file(output_file.name)
+        try:
+            shutil.copy2(output_file, storage_path)
+            library_file, _duplicate_of = await _create_library_file_entry(
+                file_path=storage_path,
+                filename=output_file.name,
+                folder_id=target_folder_id,
+                db=db,
+                current_user=current_user,
+                generate_stl_thumbnails=False,
+            )
+        except Exception:
+            if storage_path.exists():
+                try:
+                    storage_path.unlink()
+                except OSError:
+                    logger.warning("Failed to clean imported online slicer output: %s", storage_path)
+            raise
+
+        imported.append(OnlineSlicerImportResult(id=library_file.id, filename=library_file.filename))
+        imported_rel_paths.add(rel_path)
+
+    try:
+        with open(imported_index_path, "w", encoding="utf-8") as f:
+            json.dump(sorted(imported_rel_paths), f, ensure_ascii=True, indent=2)
+    except OSError:
+        logger.warning("Failed to persist online slicer import index: %s", imported_index_path)
+
+    return OnlineSlicerImportResponse(imported=imported)
 
 
 @router.post("/files/extract-zip", response_model=ZipExtractResponse)

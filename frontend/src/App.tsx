@@ -11,6 +11,8 @@ import { MaintenancePage } from './pages/MaintenancePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { FileManagerPage } from './pages/FileManagerPage';
+import { OnlineSlicerPage } from './pages/OnlineSlicerPage';
+import { KiriMotoPage } from './pages/KiriMotoPage';
 import { CameraPage } from './pages/CameraPage';
 import { StreamOverlayPage } from './pages/StreamOverlayPage';
 import { ExternalLinkPage } from './pages/ExternalLinkPage';
@@ -143,6 +145,9 @@ function App() {
                   <Route path="projects/:id" element={<ProjectDetailPage />} />
                   <Route path="inventory" element={<InventoryPage />} />
                   <Route path="files" element={<FileManagerPage />} />
+                  <Route path="slicer" element={<OnlineSlicerPage provider="bambu_studio" />} />
+                  <Route path="kiri-moto" element={<KiriMotoPage />} />
+                  <Route path="orca-slicer" element={<Navigate to="/kiri-moto" replace />} />
                   <Route path="settings" element={<AdminRoute><SettingsPage /></AdminRoute>} />
                   <Route path="groups/new" element={<AdminRoute><GroupEditPage /></AdminRoute>} />
                   <Route path="groups/:id/edit" element={<AdminRoute><GroupEditPage /></AdminRoute>} />

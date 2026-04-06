@@ -2,6 +2,8 @@ import json
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.app.core.config import settings as app_settings
+
 
 class AppSettings(BaseModel):
     """Application settings schema."""
@@ -163,7 +165,23 @@ class AppSettings(BaseModel):
     # Preferred slicer application
     preferred_slicer: str = Field(
         default="bambu_studio",
-        description="Preferred slicer: 'bambu_studio' or 'orcaslicer'",
+        description="Preferred native desktop slicer protocol. Legacy OrcaSlicer values are normalized to 'bambu_studio'.",
+    )
+    online_slicer_url: str = Field(
+        default=app_settings.online_slicer_base_url,
+        description="Browser URL for the remote BambuStudio instance (e.g. noVNC page)",
+    )
+    online_slicer_embed: bool = Field(
+        default=app_settings.online_slicer_embed_default,
+        description="Embed the remote BambuStudio UI inside Bambuddy instead of opening a new tab",
+    )
+    online_orca_slicer_url: str = Field(
+        default=app_settings.online_orca_slicer_base_url,
+        description="Browser URL for the Kiri:Moto workspace",
+    )
+    online_orca_slicer_embed: bool = Field(
+        default=app_settings.online_orca_slicer_embed_default,
+        description="Embed the Kiri:Moto UI inside Bambuddy instead of opening a new tab",
     )
 
     # Prometheus metrics endpoint
@@ -191,6 +209,27 @@ class AppSettings(BaseModel):
         default="",
         description="JSON object with 'order' key containing array of sidebar item IDs (empty = no default)",
     )
+
+    @field_validator("preferred_slicer", mode="before")
+    @classmethod
+    def normalize_preferred_slicer(cls, value: str | None) -> str:
+        """Map removed OrcaSlicer preferences onto the remaining supported option."""
+        normalized = (value or "bambu_studio").strip().lower()
+        return "bambu_studio" if normalized == "orcaslicer" else normalized
+
+    @field_validator("online_orca_slicer_url", mode="before")
+    @classmethod
+    def normalize_kiri_url(cls, value: str | None) -> str:
+        """Replace legacy Orca/noVNC URLs with the new Kiri:Moto default."""
+        normalized = (value or "").strip()
+        if not normalized:
+            return app_settings.online_orca_slicer_base_url
+
+        lower = normalized.lower()
+        if "orcaslicer" in lower or "vnc.html" in lower or ":6081" in lower:
+            return app_settings.online_orca_slicer_base_url
+
+        return normalized
 
 
 class AppSettingsUpdate(BaseModel):
@@ -256,11 +295,41 @@ class AppSettingsUpdate(BaseModel):
     library_disk_warning_gb: float | None = None
     camera_view_mode: str | None = None
     preferred_slicer: str | None = None
+    online_slicer_url: str | None = None
+    online_slicer_embed: bool | None = None
+    online_orca_slicer_url: str | None = None
+    online_orca_slicer_embed: bool | None = None
     prometheus_enabled: bool | None = None
     prometheus_token: str | None = None
     low_stock_threshold: float | None = Field(default=None, ge=0.1, le=99.9)
     user_notifications_enabled: bool | None = None
     default_sidebar_order: str | None = None
+
+    @field_validator("preferred_slicer", mode="before")
+    @classmethod
+    def normalize_preferred_slicer(cls, value: str | None) -> str | None:
+        """Accept legacy OrcaSlicer values but persist them as Bambu Studio."""
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        return "bambu_studio" if normalized == "orcaslicer" else normalized
+
+    @field_validator("online_orca_slicer_url", mode="before")
+    @classmethod
+    def normalize_kiri_url(cls, value: str | None) -> str | None:
+        """Keep updates on the Kiri:Moto URL and scrub legacy Orca URLs."""
+        if value is None:
+            return None
+
+        normalized = value.strip()
+        if not normalized:
+            return app_settings.online_orca_slicer_base_url
+
+        lower = normalized.lower()
+        if "orcaslicer" in lower or "vnc.html" in lower or ":6081" in lower:
+            return app_settings.online_orca_slicer_base_url
+
+        return normalized
 
     @field_validator("default_sidebar_order")
     @classmethod

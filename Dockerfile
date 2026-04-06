@@ -1,48 +1,17 @@
-# Build frontend
-FROM node:22-bookworm-slim AS frontend-builder
-
-WORKDIR /app/frontend
-
-# Copy package files first for better caching
-COPY frontend/package*.json ./
-
-# Use cache mount for npm
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
-
-COPY frontend/ ./
-RUN npm run build
-
-# Production image
-FROM python:3.13-slim
+FROM python:3.11-slim
 
 WORKDIR /app
+ENV PIP_PROGRESS_BAR=off
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ffmpeg \
-    iproute2 \
-    libcap2-bin \
-    openssh-client \
-    && rm -rf /var/lib/apt/lists/*
-
-# Allow binding to privileged ports (e.g. 990/FTPS) as non-root user.
-# File capabilities are more reliable than Docker cap_add with user: directive,
-# which depends on ambient capability support in the container runtime.
-RUN setcap cap_net_bind_service=+ep "$(readlink -f /usr/local/bin/python3)"
-
-# Install Python dependencies with cache mount
 COPY requirements.txt ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --root-user-action=ignore -r requirements.txt
+RUN pip install --progress-bar off --root-user-action=ignore -r requirements.txt
 
 # Copy backend
 COPY backend/ ./backend/
 
-# Copy built frontend from builder stage
-COPY --from=frontend-builder /app/static ./static
+# Copy prebuilt frontend assets
+COPY static/ ./static/
 
 # Create data directory for persistent storage
 # chmod 777 allows running as non-root user (e.g., with docker compose user: directive)

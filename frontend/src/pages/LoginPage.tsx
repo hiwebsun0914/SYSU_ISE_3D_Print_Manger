@@ -4,7 +4,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { X, Mail } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
@@ -15,7 +14,6 @@ export function LoginPage() {
   const { t } = useTranslation();
   const { login } = useAuth();
   const { showToast } = useToast();
-  const { mode } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -74,8 +72,8 @@ export function LoginPage() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src={mode === 'dark' ? '/img/bambuddy_logo_dark_transparent.png' : '/img/bambuddy_logo_light.png'}
-              alt="Bambuddy"
+              src="/img/SYSU.png"
+              alt="SYSU"
               className="h-16"
             />
           </div>

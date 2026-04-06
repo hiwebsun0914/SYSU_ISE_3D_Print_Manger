@@ -858,6 +858,10 @@ export interface AppSettings {
   camera_view_mode: 'window' | 'embedded';
   // Preferred slicer
   preferred_slicer: 'bambu_studio' | 'orcaslicer';
+  online_slicer_url: string;
+  online_slicer_embed: boolean;
+  online_orca_slicer_url: string;
+  online_orca_slicer_embed: boolean;
   // Prometheus metrics
   prometheus_enabled: boolean;
   prometheus_token: string;
@@ -872,6 +876,8 @@ export interface AppSettings {
 }
 
 export type AppSettingsUpdate = Partial<AppSettings>;
+
+export type OnlineSlicerProvider = 'bambu_studio' | 'orcaslicer';
 
 // MQTT relay status
 export interface MQTTStatus {
@@ -4072,6 +4078,8 @@ export const api = {
     request<LibraryFolder[]>(`/library/folders/by-project/${projectId}`),
   getLibraryFoldersByArchive: (archiveId: number) =>
     request<LibraryFolder[]>(`/library/folders/by-archive/${archiveId}`),
+  getLibrarySlicePresets: () =>
+    request<LocalPresetsResponse>('/library/slicing/presets'),
 
   getLibraryFiles: (folderId?: number | null, includeRoot = true) => {
     const params = new URLSearchParams();
@@ -4107,6 +4115,20 @@ export const api = {
     }
     return response.json();
   },
+  sliceLibraryFile: (fileId: number, data: LibrarySliceRequest) =>
+    request<LibraryFileUploadResponse>(`/library/files/${fileId}/slice`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  createLibraryOnlineSlicerSession: (fileId: number, data: LibraryOnlineSlicerSessionRequest = {}) =>
+    request<LibraryOnlineSlicerSessionResponse>(`/library/files/${fileId}/online-slicer/session`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  importLibraryOnlineSlicerSessionOutputs: (sessionId: string) =>
+    request<LibraryOnlineSlicerImportResponse>(`/library/online-slicer/sessions/${sessionId}/import`, {
+      method: 'POST',
+    }),
   extractZipFile: async (
     file: File,
     folderId?: number | null,
@@ -4572,6 +4594,43 @@ export interface LibraryFileUploadResponse {
   thumbnail_path: string | null;
   duplicate_of: number | null;
   metadata: Record<string, unknown> | null;
+}
+
+export interface LibrarySliceRequest {
+  printer_preset_id: number;
+  process_preset_id: number;
+  filament_preset_id: number;
+  output_filename?: string | null;
+  folder_id?: number | null;
+  arrange?: boolean;
+  orient?: boolean;
+}
+
+export interface LibraryOnlineSlicerSessionRequest {
+  folder_id?: number | null;
+  provider?: OnlineSlicerProvider;
+}
+
+export interface LibraryOnlineSlicerSessionResponse {
+  provider: OnlineSlicerProvider;
+  session_id: string;
+  source_file_id: number;
+  source_filename: string;
+  target_folder_id: number | null;
+  launch_url: string;
+  embed: boolean;
+  workspace_input_file: string;
+  workspace_output_dir: string;
+  download_url: string;
+}
+
+export interface LibraryOnlineSlicerImportResult {
+  id: number;
+  filename: string;
+}
+
+export interface LibraryOnlineSlicerImportResponse {
+  imported: LibraryOnlineSlicerImportResult[];
 }
 
 export interface LibraryStats {

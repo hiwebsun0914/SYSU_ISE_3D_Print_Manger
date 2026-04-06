@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -35,6 +35,7 @@ import {
   Pencil,
   Play,
   Image,
+  Layers,
   User,
   Box,
   RefreshCw,
@@ -690,6 +691,7 @@ interface FileCardProps {
   onDownload: (id: number) => void;
   onAddToQueue?: (id: number) => void;
   onPrint?: (file: LibraryFileListItem) => void;
+  onSlice?: (file: LibraryFileListItem) => void;
   onPreview3d?: (file: LibraryFileListItem) => void;
   onRename?: (file: LibraryFileListItem) => void;
   onGenerateThumbnail?: (file: LibraryFileListItem) => void;
@@ -700,7 +702,7 @@ interface FileCardProps {
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onAddToQueue, onPrint, onPreview3d, onRename, onGenerateThumbnail, thumbnailVersion, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onAddToQueue, onPrint, onSlice, onPreview3d, onRename, onGenerateThumbnail, thumbnailVersion, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   const [showActions, setShowActions] = useState(false);
 
   return (
@@ -805,6 +807,19 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
                   {t('fileManager.schedulePrint')}
                 </button>
               )}
+              {onSlice && file.file_type === 'stl' && (
+                <button
+                  className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
+                    hasPermission('library:upload') ? 'text-white hover:bg-bambu-dark' : 'text-bambu-gray cursor-not-allowed'
+                  }`}
+                  onClick={() => { if (hasPermission('library:upload')) { onSlice(file); setShowActions(false); } }}
+                  disabled={!hasPermission('library:upload')}
+                  title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  {t('fileManager.slice.action')}
+                </button>
+              )}
               {onPreview3d && (file.file_type === '3mf' || file.file_type === 'gcode' || file.file_type === 'stl') && (
                 <button
                   className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
@@ -885,6 +900,7 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
 
 export function FileManagerPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify, authEnabled } = useAuth();
@@ -1316,6 +1332,14 @@ export function FileManagerPage() {
     api.downloadLibraryFile(id).catch((err) => {
       console.error('Library file download failed:', err);
     });
+  };
+
+  const handleOpenOnlineSlicer = (file: LibraryFileListItem) => {
+    const params = new URLSearchParams({ fileId: String(file.id) });
+    if (selectedFolderId !== null) {
+      params.set('folderId', String(selectedFolderId));
+    }
+    navigate(`/kiri-moto?${params.toString()}`);
   };
 
   const handleDeleteConfirm = () => {
@@ -1878,6 +1902,7 @@ export function FileManagerPage() {
                       if (file) setScheduleFile(file);
                     }}
                     onPrint={setPrintFile}
+                    onSlice={handleOpenOnlineSlicer}
                     onPreview3d={setViewerFile}
                     onRename={(f) => setRenameItem({ type: 'file', id: f.id, name: f.filename })}
                     onGenerateThumbnail={(f) => singleThumbnailMutation.mutate(f.id)}
@@ -2052,6 +2077,20 @@ export function FileManagerPage() {
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
+                      {file.file_type === 'stl' && (
+                        <button
+                          onClick={() => hasPermission('library:upload') && handleOpenOnlineSlicer(file)}
+                          className={`p-1.5 rounded transition-colors ${
+                            hasPermission('library:upload')
+                              ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
+                              : 'text-bambu-gray/50 cursor-not-allowed'
+                          }`}
+                          title={hasPermission('library:upload') ? t('fileManager.slice.action') : t('fileManager.noPermissionUpload')}
+                          disabled={!hasPermission('library:upload')}
+                        >
+                          <Layers className="w-4 h-4" />
+                        </button>
+                      )}
                       {file.file_type === 'stl' && (
                         <button
                           onClick={() => canModify('library', 'update', file.created_by_id) && singleThumbnailMutation.mutate(file.id)}
