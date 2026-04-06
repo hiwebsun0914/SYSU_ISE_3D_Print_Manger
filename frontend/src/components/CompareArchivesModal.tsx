@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { X, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { ArchiveComparison } from '../api/client';
@@ -10,7 +11,25 @@ interface CompareArchivesModalProps {
   onClose: () => void;
 }
 
+function getArchiveStatusLabel(status: string, t: (key: string, options?: Record<string, unknown>) => string): string {
+  switch (status) {
+    case 'completed':
+      return t('archives.status.completed');
+    case 'failed':
+      return t('archives.status.failed');
+    case 'stopped':
+      return t('archives.status.stopped');
+    case 'cancelled':
+      return t('archives.log.cancelled');
+    case 'skipped':
+      return t('archives.log.skipped');
+    default:
+      return status;
+  }
+}
+
 export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesModalProps) {
+  const { t } = useTranslation();
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -31,7 +50,7 @@ export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesMod
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
           <h3 className="text-lg font-semibold text-white">
-            Compare Archives ({archiveIds.length})
+            {t('compareArchives.title', { count: archiveIds.length })}
           </h3>
           <button
             onClick={onClose}
@@ -50,9 +69,9 @@ export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesMod
           ) : error ? (
             <div className="text-center py-12 text-red-400">
               <AlertTriangle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Failed to load comparison</p>
+              <p>{t('compareArchives.loadFailed')}</p>
               <p className="text-sm text-bambu-gray mt-2">
-                {error instanceof Error ? error.message : 'Unknown error'}
+                {error instanceof Error ? error.message : t('common.unknownError')}
               </p>
             </div>
           ) : comparison ? (
@@ -63,7 +82,7 @@ export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesMod
         {/* Footer */}
         <div className="p-4 border-t border-bambu-dark-tertiary">
           <Button variant="secondary" onClick={onClose} className="w-full">
-            Close
+            {t('common.close')}
           </Button>
         </div>
       </div>
@@ -72,6 +91,11 @@ export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesMod
 }
 
 function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
+  const { t } = useTranslation();
+  const correlationMessage = comparison.success_correlation.message === 'Need both successful and failed prints to analyze correlation'
+    ? t('compareArchives.needBothOutcomes')
+    : comparison.success_correlation.message;
+
   return (
     <div className="space-y-6">
       {/* Archive Headers */}
@@ -80,7 +104,7 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
           <thead>
             <tr>
               <th className="text-left text-sm text-bambu-gray font-medium pb-2 pr-4 min-w-[150px]">
-                Setting
+                {t('compareArchives.setting')}
               </th>
               {comparison.archives.map((archive) => (
                 <th
@@ -94,7 +118,7 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
                     archive.status === 'completed' ? 'text-status-ok' :
                     archive.status === 'failed' ? 'text-status-error' : 'text-bambu-gray'
                   }`}>
-                    {archive.status}
+                    {getArchiveStatusLabel(archive.status, t)}
                   </div>
                 </th>
               ))}
@@ -135,7 +159,7 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
         <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
           <h4 className="text-sm font-medium text-yellow-400 mb-2 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" />
-            {comparison.differences.length} Difference{comparison.differences.length > 1 ? 's' : ''} Found
+            {t('compareArchives.differencesFound', { count: comparison.differences.length })}
           </h4>
           <ul className="text-sm text-white/80 space-y-1">
             {comparison.differences.slice(0, 5).map((diff) => (
@@ -145,7 +169,7 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
             ))}
             {comparison.differences.length > 5 && (
               <li className="text-bambu-gray">
-                ...and {comparison.differences.length - 5} more
+                {t('compareArchives.moreDifferences', { count: comparison.differences.length - 5 })}
               </li>
             )}
           </ul>
@@ -157,14 +181,14 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
         <div className="p-4 bg-bambu-dark rounded-lg">
           <h4 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
             <Check className="w-4 h-4 text-bambu-green" />
-            Success/Failure Analysis
+            {t('compareArchives.analysis')}
           </h4>
           <div className="flex items-center gap-4 text-sm mb-3">
             <span className="text-bambu-green">
-              {comparison.success_correlation.successful_count} successful
+              {t('compareArchives.successful', { count: comparison.success_correlation.successful_count })}
             </span>
             <span className="text-red-400">
-              {comparison.success_correlation.failed_count} failed
+              {t('compareArchives.failed', { count: comparison.success_correlation.failed_count })}
             </span>
           </div>
           {comparison.success_correlation.insights && comparison.success_correlation.insights.length > 0 ? (
@@ -177,12 +201,12 @@ function ComparisonContent({ comparison }: { comparison: ArchiveComparison }) {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-bambu-gray">No clear correlations found between settings and outcomes.</p>
+            <p className="text-sm text-bambu-gray">{t('compareArchives.noCorrelations')}</p>
           )}
         </div>
       ) : (
         <div className="p-4 bg-bambu-dark rounded-lg text-sm text-bambu-gray">
-          <p>{comparison.success_correlation.message || 'Need both successful and failed prints for correlation analysis.'}</p>
+          <p>{correlationMessage || t('compareArchives.needBothOutcomes')}</p>
         </div>
       )}
     </div>

@@ -77,6 +77,33 @@ function getIcon(iconName: string | null) {
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
 
+const maintenanceTypeKeyMap: Record<string, string> = {
+  'Lubricate Carbon Rods': 'lubricateCarbonRods',
+  'Lubricate Linear Rails': 'lubricateRails',
+  'Clean Nozzle/Hotend': 'cleanNozzle',
+  'Check Belt Tension': 'checkBelts',
+  'Clean Build Plate': 'cleanBuildPlate',
+  'Check Extruder Gears': 'checkExtruder',
+  'Check Cooling Fans': 'checkCooling',
+  'General Inspection': 'generalInspection',
+  'Clean Carbon Rods': 'cleanCarbonRods',
+  'Lubricate Steel Rods': 'lubricateSteelRods',
+  'Clean Steel Rods': 'cleanSteelRods',
+  'Clean Linear Rails': 'cleanLinearRails',
+  'Check PTFE Tube': 'checkPtfeTube',
+  'Replace HEPA Filter': 'replaceHepaFilter',
+  'HEPA Filter': 'replaceHepaFilter',
+  'Replace Carbon Filter': 'replaceCarbonFilter',
+  'Carbon Filter': 'replaceCarbonFilter',
+  'Lubricate Left Nozzle Rail': 'lubricateLeftNozzleRail',
+  'Left Nozzle Rail': 'lubricateLeftNozzleRail',
+};
+
+function getMaintenanceTypeLabel(typeName: string, t: TFunction): string {
+  const key = maintenanceTypeKeyMap[typeName];
+  return key ? t(`maintenance.types.${key}`) : typeName;
+}
+
 function formatDuration(value: number, type: 'hours' | 'days', t?: TFunction): string {
   if (type === 'days') {
     if (value < 1) return t ? t('common.today') : 'Today';
@@ -97,16 +124,38 @@ function formatDuration(value: number, type: 'hours' | 'days', t?: TFunction): s
     return t ? t('maintenance.months', { count: months }) : `${months} months`;
   } else {
     // Print hours - convert to readable units
-    if (value < 1) return `${Math.round(value * 60)}m`;
-    if (value < 24) return `${value < 10 ? value.toFixed(1) : Math.round(value)}h`;
+    if (value < 1) {
+      const minutes = Math.max(1, Math.round(value * 60));
+      if (!t) return `${minutes}m`;
+      return minutes === 1 ? t('maintenance.minute') : t('maintenance.minutes', { count: minutes });
+    }
+
+    if (value < 24) {
+      const hours = value < 10 ? Number(value.toFixed(1)) : Math.round(value);
+      if (!t) return `${hours}h`;
+      return hours === 1 ? t('maintenance.hour') : t('maintenance.hoursCount', { count: hours });
+    }
+
     // 24+ hours: show as days of print time
     const days = value / 24;
-    if (days < 7) return `${days < 2 ? days.toFixed(1) : Math.round(days)}d`;
+    if (days < 7) {
+      const displayDays = days < 2 ? Number(days.toFixed(1)) : Math.round(days);
+      if (!t) return `${displayDays}d`;
+      return displayDays === 1 ? t('maintenance.day') : t('maintenance.days', { count: displayDays });
+    }
+
     // 7+ days: show as weeks of print time
     const weeks = days / 7;
-    if (weeks < 12) return `${weeks < 2 ? weeks.toFixed(1) : Math.round(weeks)}w`;
+    if (weeks < 12) {
+      const displayWeeks = weeks < 2 ? Number(weeks.toFixed(1)) : Math.round(weeks);
+      if (!t) return `${displayWeeks}w`;
+      return displayWeeks === 1 ? t('maintenance.week') : t('maintenance.weeks', { count: displayWeeks });
+    }
+
     // 12+ weeks: show as months of print time
-    return `${Math.round(weeks / 4)}mo`;
+    const months = Math.round(weeks / 4);
+    if (!t) return `${months}mo`;
+    return months === 1 ? t('maintenance.month') : t('maintenance.months', { count: months });
   }
 }
 
@@ -122,7 +171,8 @@ function formatIntervalLabel(value: number, type: 'hours' | 'days', t?: TFunctio
     if (value === 365) return t ? t('maintenance.year') : '1 year';
     return t ? t('maintenance.days', { count: value }) : `${value} days`;
   }
-  return `${value}h`;
+  if (!t) return `${value}h`;
+  return value === 1 ? t('maintenance.hour') : t('maintenance.hoursCount', { count: value });
 }
 
 // Get Bambu Lab wiki URL for a maintenance task based on printer model
@@ -308,7 +358,7 @@ function MaintenanceCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className={`font-medium truncate ${item.enabled ? 'text-white' : 'text-bambu-gray'}`}>
-              {item.maintenance_type_name}
+              {getMaintenanceTypeLabel(item.maintenance_type_name, t)}
             </h3>
             {intervalType === 'days' && (
               <span title={t('maintenance.timeBasedInterval')}>
@@ -516,7 +566,7 @@ function PrinterSection({
               </div>
               <div>
                 <div className={`text-sm font-medium ${nextTask.is_due ? 'text-red-400' : 'text-amber-400'}`}>
-                  {nextTask.maintenance_type_name}
+                  {getMaintenanceTypeLabel(nextTask.maintenance_type_name, t)}
                 </div>
                 <div className={`text-xs ${nextTask.is_due ? 'text-red-400/70' : 'text-amber-400/70'}`}>
                   {nextTask.is_due ? t('common.overdue') : t('maintenance.dueSoon')}
@@ -859,7 +909,7 @@ function SettingsSection({
                     <Icon className="w-5 h-5 text-bambu-gray" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">{type.name}</div>
+                    <div className="text-sm font-medium text-white truncate">{getMaintenanceTypeLabel(type.name, t)}</div>
                     <div className="text-xs text-bambu-gray mt-0.5 flex items-center gap-1">
                       {intervalType === 'days' ? <Calendar className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
                       {formatIntervalLabel(type.default_interval_hours, intervalType, t)}
@@ -1085,7 +1135,9 @@ function SettingsSection({
                       return (
                         <div key={item.id} className="flex items-center gap-2 p-2.5 bg-bambu-dark rounded-lg">
                           <Icon className="w-4 h-4 text-bambu-gray shrink-0" />
-                          <span className="text-xs text-bambu-gray flex-1 truncate">{item.maintenance_type_name}</span>
+                          <span className="text-xs text-bambu-gray flex-1 truncate">
+                            {getMaintenanceTypeLabel(item.maintenance_type_name, t)}
+                          </span>
 
                           {isEditing ? (
                             <div className="flex items-center gap-1">
@@ -1113,7 +1165,9 @@ function SettingsSection({
                                 className="w-16 px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs"
                                 min="1"
                               />
-                              <Button size="sm" onClick={() => handleSaveInterval(item.id, defaultInterval, defaultIntervalType)}>OK</Button>
+                              <Button size="sm" onClick={() => handleSaveInterval(item.id, defaultInterval, defaultIntervalType)}>
+                                {t('common.save')}
+                              </Button>
                             </div>
                           ) : (
                             <button
@@ -1158,7 +1212,7 @@ function SettingsSection({
       {pendingSystemDelete && (
         <ConfirmModal
           title={t('maintenance.deleteSystemTypeTitle')}
-          message={t('maintenance.deleteSystemTypeMessage', { name: pendingSystemDelete.name })}
+          message={t('maintenance.deleteSystemTypeMessage', { name: getMaintenanceTypeLabel(pendingSystemDelete.name, t) })}
           confirmText={t('common.delete')}
           cancelText={t('common.cancel')}
           variant="danger"

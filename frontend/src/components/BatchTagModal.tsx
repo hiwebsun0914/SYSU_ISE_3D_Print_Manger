@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { X, Tag, Plus, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -13,6 +14,7 @@ interface BatchTagModalProps {
 }
 
 export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagModalProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [newTag, setNewTag] = useState('');
@@ -52,18 +54,24 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
           successCount++;
         } catch (err) {
           console.error(`Failed to update archive ${id}:`, err);
-          throw new Error(`Failed on archive ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          throw new Error(
+            `${t('batchTag.updateFailed')} (#${id}): ${err instanceof Error ? err.message : t('common.unknownError')}`
+          );
         }
       }
       return { count: successCount, mode, tags: tagsArray };
     },
     onSuccess: ({ count, mode, tags }) => {
       queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(`${mode === 'add' ? 'Added' : 'Removed'} ${tags.length} tag${tags.length !== 1 ? 's' : ''} ${mode === 'add' ? 'to' : 'from'} ${count} archive${count !== 1 ? 's' : ''}`);
+      showToast(
+        mode === 'add'
+          ? t('batchTag.addSuccess', { count, tags: tags.length })
+          : t('batchTag.removeSuccess', { count, tags: tags.length })
+      );
       onClose();
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to update tags', 'error');
+      showToast(error.message || t('batchTag.updateFailed'), 'error');
     },
   });
 
@@ -102,7 +110,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
             <div className="flex items-center gap-2">
               <Tag className="w-5 h-5 text-bambu-green" />
               <h2 className="text-xl font-semibold text-white">
-                {mode === 'add' ? 'Add Tags' : 'Remove Tags'}
+                {mode === 'add' ? t('batchTag.titleAdd') : t('batchTag.titleRemove')}
               </h2>
             </div>
             <button
@@ -116,7 +124,9 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
           {/* Content */}
           <div className="p-4 space-y-4">
             <p className="text-sm text-bambu-gray">
-              {mode === 'add' ? 'Add' : 'Remove'} tags for {selectedIds.length} selected archive{selectedIds.length !== 1 ? 's' : ''}
+              {mode === 'add'
+                ? t('batchTag.descriptionAdd', { count: selectedIds.length })
+                : t('batchTag.descriptionRemove', { count: selectedIds.length })}
             </p>
 
             {/* Mode toggle */}
@@ -126,14 +136,14 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
                 variant={mode === 'add' ? 'primary' : 'secondary'}
                 onClick={() => setMode('add')}
               >
-                Add Tags
+                {t('batchTag.addTags')}
               </Button>
               <Button
                 size="sm"
                 variant={mode === 'remove' ? 'primary' : 'secondary'}
                 onClick={() => setMode('remove')}
               >
-                Remove Tags
+                {t('batchTag.removeTags')}
               </Button>
             </div>
 
@@ -142,7 +152,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Enter new tag..."
+                  placeholder={t('batchTag.placeholders.newTag')}
                   className="flex-1 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
                   value={newTag}
                   onChange={(e) => setNewTag(e.target.value)}
@@ -157,7 +167,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
             {/* Existing tags */}
             {existingTags.length > 0 && (
               <div>
-                <p className="text-xs text-bambu-gray mb-2">Existing tags:</p>
+                <p className="text-xs text-bambu-gray mb-2">{t('batchTag.existingTags')}</p>
                 <div className="flex flex-wrap gap-2">
                   {existingTags.map((tag) => (
                     <button
@@ -180,7 +190,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
             {selectedTags.size > 0 && (
               <div>
                 <p className="text-xs text-bambu-gray mb-2">
-                  Tags to {mode === 'add' ? 'add' : 'remove'}:
+                  {mode === 'add' ? t('batchTag.tagsToAdd') : t('batchTag.tagsToRemove')}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {Array.from(selectedTags).map((tag) => (
@@ -204,7 +214,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
           {/* Footer */}
           <div className="flex gap-3 p-4 border-t border-bambu-dark-tertiary">
             <Button variant="secondary" onClick={onClose} className="flex-1">
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={() => batchTagMutation.mutate()}
@@ -214,12 +224,12 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
               {batchTagMutation.isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Processing...
+                  {t('batchTag.processing')}
                 </>
               ) : (
                 <>
                   <Tag className="w-4 h-4" />
-                  {mode === 'add' ? 'Add Tags' : 'Remove Tags'}
+                  {mode === 'add' ? t('batchTag.addTags') : t('batchTag.removeTags')}
                 </>
               )}
             </Button>
