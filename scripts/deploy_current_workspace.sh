@@ -41,7 +41,9 @@ Environment:
   REMOTE_WORKSPACE_ROOT       Default: /opt/bambuddy-workspaces
   BUILD_IN_DOCKER             Default: 1
   NODE_IMAGE                  Default: node:20-alpine
-  BUILD_NODE_OPTIONS          Default: --max-old-space-size=12288 --max-semi-space-size=512
+  BUILD_NODE_OPTIONS          Default: --max-old-space-size=2048 --max-semi-space-size=1
+  BUILD_VITE_ARGS             Default: --minify=false
+  BUILD_RETRY_ON_FAIL         Default: 1
   REMOTE_PRIVILEGE_PREFIX     Optional. Example: sudo
 
 Examples:
@@ -82,7 +84,9 @@ REMOTE_SOURCE_ROOT="${REMOTE_SOURCE_ROOT:-/opt/bambuddy-source-releases}"
 REMOTE_WORKSPACE_ROOT="${REMOTE_WORKSPACE_ROOT:-/opt/bambuddy-workspaces}"
 BUILD_IN_DOCKER="${BUILD_IN_DOCKER:-1}"
 NODE_IMAGE="${NODE_IMAGE:-node:20-alpine}"
-BUILD_NODE_OPTIONS="${BUILD_NODE_OPTIONS:---max-old-space-size=12288 --max-semi-space-size=512}"
+BUILD_NODE_OPTIONS="${BUILD_NODE_OPTIONS:---max-old-space-size=2048 --max-semi-space-size=1}"
+BUILD_VITE_ARGS="${BUILD_VITE_ARGS:---minify=false}"
+BUILD_RETRY_ON_FAIL="${BUILD_RETRY_ON_FAIL:-1}"
 REMOTE_PRIVILEGE_PREFIX="${REMOTE_PRIVILEGE_PREFIX:-}"
 SKIP_BUILD=0
 UPLOAD_SOURCE_SNAPSHOT=1
@@ -181,24 +185,99 @@ ensure_frontend_deps() {
   (cd "${FRONTEND_DIR}" && npm install)
 }
 
-build_frontend() {
-  ensure_frontend_deps
+build_frontend_once() {
+  local build_runner="$1"
+  local node_options="$2"
+  local vite_args="$3"
+  local build_cmd='./node_modules/.bin/vite build'
+  local -a vite_args_array=()
 
-  log "building frontend from current workspace"
-  if [[ "${BUILD_IN_DOCKER}" == "1" ]]; then
+  if [[ -n "${vite_args}" ]]; then
+    # shellcheck disable=SC2206
+    vite_args_array=(${vite_args})
+    build_cmd+=" ${vite_args}"
+  fi
+
+  log "building frontend via ${build_runner}: NODE_OPTIONS='${node_options}' ${build_cmd}"
+
+  if [[ "${build_runner}" == "docker" ]]; then
     require_cmd docker
     docker run --rm \
       -v "${REPO_ROOT}:/repo" \
       -w /repo/frontend \
-      -e "NODE_OPTIONS=${BUILD_NODE_OPTIONS}" \
+      -e "NODE_OPTIONS=${node_options}" \
       "${NODE_IMAGE}" \
-      sh -lc './node_modules/.bin/vite build'
+      sh -lc 'exec ./node_modules/.bin/vite build "$@"' sh "${vite_args_array[@]}"
   else
+    require_cmd node
     (
       cd "${FRONTEND_DIR}"
-      NODE_OPTIONS="${BUILD_NODE_OPTIONS}" ./node_modules/.bin/vite build
+      NODE_OPTIONS="${node_options}" ./node_modules/.bin/vite build "${vite_args_array[@]}"
     )
   fi
+}
+
+build_frontend() {
+  ensure_frontend_deps
+
+  local -a build_runners=()
+  if [[ "${BUILD_IN_DOCKER}" == "1" ]]; then
+    build_runners+=(docker host)
+  else
+    build_runners+=(host docker)
+  fi
+
+  local -a build_profiles=("${BUILD_NODE_OPTIONS}|${BUILD_VITE_ARGS}")
+  if [[ "${BUILD_RETRY_ON_FAIL}" == "1" ]]; then
+    if [[ "${BUILD_VITE_ARGS}" != *"--minify=false"* ]]; then
+      build_profiles+=("${BUILD_NODE_OPTIONS}|${BUILD_VITE_ARGS:+${BUILD_VITE_ARGS} }--minify=false")
+    fi
+    if [[ "${BUILD_NODE_OPTIONS}" != "--max-old-space-size=2048 --max-semi-space-size=1" || "${BUILD_VITE_ARGS}" != "--minify=false" ]]; then
+      build_profiles+=("--max-old-space-size=2048 --max-semi-space-size=1|--minify=false")
+    fi
+  fi
+
+  local -A seen_attempts=()
+  local build_runner
+  local build_profile
+  local node_options
+  local vite_args
+
+  for build_runner in "${build_runners[@]}"; do
+    if [[ "${build_runner}" == "docker" ]] && ! command -v docker >/dev/null 2>&1; then
+      log "skipping docker build fallback because docker is not installed"
+      continue
+    fi
+    if [[ "${build_runner}" == "host" ]] && ! command -v node >/dev/null 2>&1; then
+      log "skipping host build fallback because node is not installed"
+      continue
+    fi
+
+    for build_profile in "${build_profiles[@]}"; do
+      if [[ -n "${seen_attempts["${build_runner}|${build_profile}"]:-}" ]]; then
+        continue
+      fi
+      seen_attempts["${build_runner}|${build_profile}"]=1
+
+      node_options="${build_profile%%|*}"
+      vite_args="${build_profile#*|}"
+
+      if build_frontend_once "${build_runner}" "${node_options}" "${vite_args}"; then
+        if [[ "${vite_args}" == *"--minify=false"* ]]; then
+          log "frontend build completed with minification disabled to avoid Node OOM"
+        fi
+        return 0
+      fi
+
+      if [[ "${BUILD_RETRY_ON_FAIL}" == "1" ]]; then
+        log "build attempt failed; trying next fallback profile"
+      else
+        die "frontend build failed"
+      fi
+    done
+  done
+
+  die "frontend build failed after all OOM-safe fallback profiles"
 }
 
 extract_main_asset() {
