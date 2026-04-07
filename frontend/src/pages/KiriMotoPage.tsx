@@ -4,8 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowUpRight,
-  Download,
-  FolderOpen,
   Layers,
   Loader2,
   Settings2,
@@ -14,8 +12,6 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getAuthToken, type AppSettings, type LibraryFile } from '../api/client';
 import { Button } from '../components/Button';
-import { Card, CardContent, CardHeader } from '../components/Card';
-import { useToast } from '../contexts/ToastContext';
 import { resolveOnlineSlicerUrlTemplate } from '../utils/onlineSlicer';
 
 declare global {
@@ -81,17 +77,18 @@ function isStlFile(fileType: string | undefined, filename: string): boolean {
 export function KiriMotoPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { showToast } = useToast();
   const [searchParams] = useSearchParams();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pendingModelRef = useRef<{ key: string; buffer: ArrayBuffer } | null>(null);
   const loadedModelKeyRef = useRef<string | null>(null);
   const frameBoundRef = useRef(false);
+  const pageRef = useRef<HTMLDivElement | null>(null);
 
   const [bridgeReady, setBridgeReady] = useState(false);
   const [kiriReady, setKiriReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [workspaceHeight, setWorkspaceHeight] = useState<number | null>(null);
 
   const fileId = Number(searchParams.get('fileId') || '');
   const requestedFolderIdParam = searchParams.get('folderId');
@@ -241,166 +238,127 @@ export function KiriMotoPage() {
     pushPendingModelIntoKiri();
   }, [kiriReady]);
 
-  async function handleDownloadSource() {
-    try {
-      if (hasValidFileId) {
-        await api.downloadLibraryFile(fileId, sourceFilename || undefined);
+  useEffect(() => {
+    function updateWorkspaceHeight() {
+      if (!pageRef.current) {
         return;
       }
 
-      if (sourceDownloadUrl) {
-        window.open(sourceDownloadUrl, '_blank', 'noopener,noreferrer');
-      }
-    } catch {
-      showToast(t('kiriMoto.toast.downloadFailed'), 'error');
+      const nextHeight = Math.max(window.innerHeight - Math.max(pageRef.current.getBoundingClientRect().top, 0), 480);
+      setWorkspaceHeight((currentHeight) => (currentHeight === nextHeight ? currentHeight : nextHeight));
     }
-  }
+
+    updateWorkspaceHeight();
+    window.addEventListener('resize', updateWorkspaceHeight);
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => updateWorkspaceHeight())
+      : null;
+
+    if (resizeObserver) {
+      resizeObserver.observe(document.body);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateWorkspaceHeight);
+      resizeObserver?.disconnect();
+    };
+  }, []);
 
   const unavailable = !activeLaunchUrl;
 
   return (
-    <div className="h-full flex flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-white">
-            <Layers className="w-5 h-5 text-bambu-green" />
-            <h1 className="text-xl font-semibold">{t('settings.slicerOrcaSlicer')}</h1>
-          </div>
-          <p className="text-sm text-bambu-gray mt-1">
-            {sourceFilename
-              ? t('kiriMoto.descriptionWithFile', { filename: sourceFilename })
-              : t('kiriMoto.description')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={goBack}>
-            <ArrowLeft className="w-4 h-4" />
-            {t('kiriMoto.backToFiles')}
-          </Button>
-          <Button variant="secondary" onClick={() => navigate('/settings?tab=network')}>
-            <Settings2 className="w-4 h-4" />
-            {t('kiriMoto.settings')}
-          </Button>
-          {activeLaunchUrl && (
-            <Button variant="secondary" onClick={() => window.open(activeLaunchUrl, '_blank', 'noopener,noreferrer')}>
-              <ArrowUpRight className="w-4 h-4" />
-              {t('kiriMoto.openInNewTab')}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)] flex-1 min-h-0">
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-semibold text-white">{t('kiriMoto.sourceTitle')}</h2>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm text-bambu-gray">
-              {sourceFilename ? (
-                <>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-bambu-gray">
-                      {t('kiriMoto.sourceFile')}
-                    </div>
-                    <div className="mt-2 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-xs text-white break-all">
-                      {sourceFilename}
-                    </div>
-                  </div>
-                  <p>
-                    {autoLoadSupported
-                      ? t('kiriMoto.autoLoadReady')
-                      : t('kiriMoto.autoLoadUnsupported')}
-                  </p>
-                  {sourceDownloadUrl && (
-                    <Button variant="secondary" onClick={handleDownloadSource}>
-                      <Download className="w-4 h-4" />
-                      {t('kiriMoto.downloadSource')}
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p>{t('kiriMoto.manualLaunchDescription')}</p>
-                  <Button variant="secondary" onClick={() => navigate('/files')}>
-                    <FolderOpen className="w-4 h-4" />
-                    {t('kiriMoto.backToFiles')}
-                  </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-semibold text-white">{t('kiriMoto.instructionsTitle')}</h2>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-bambu-gray">
-              <p>{t('kiriMoto.instructions.step1')}</p>
-              <p>{t('kiriMoto.instructions.step2')}</p>
-              <p>{t('kiriMoto.instructions.step3')}</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="min-h-[540px] flex flex-col overflow-hidden">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-white">{t('kiriMoto.browserTitle')}</h2>
-              {statusMessage && (
-                <div className="flex items-center gap-2 text-xs text-bambu-gray">
-                  {!loadError && <Loader2 className={`w-4 h-4 ${statusMessage === t('kiriMoto.status.modelLoaded') ? '' : 'animate-spin'}`} />}
-                  <span>{statusMessage}</span>
-                </div>
-              )}
+    <div
+      ref={pageRef}
+      className="flex flex-col overflow-hidden"
+      style={workspaceHeight ? { height: `${workspaceHeight}px` } : { minHeight: '640px' }}
+    >
+      <div className="border-b border-bambu-dark-tertiary bg-bambu-dark-secondary/95 px-4 py-3 backdrop-blur md:px-6">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-white">
+              <Layers className="w-5 h-5 text-bambu-green" />
+              <h1 className="text-xl font-semibold">{t('settings.slicerOrcaSlicer')}</h1>
             </div>
-          </CardHeader>
-          <CardContent className="flex-1 min-h-0">
-            {unavailable && (
-              <div className="h-full flex flex-col items-center justify-center gap-4 text-center text-bambu-gray">
-                <AlertTriangle className="w-12 h-12 text-yellow-400" />
-                <div>
-                  <p className="text-white font-medium">{t('kiriMoto.unavailableTitle')}</p>
-                  <p className="mt-1">{t('kiriMoto.unavailableDescription')}</p>
-                </div>
-                <Button variant="secondary" onClick={() => navigate('/settings?tab=network')}>
-                  <Settings2 className="w-4 h-4" />
-                  {t('kiriMoto.settings')}
-                </Button>
+            <p className="mt-1 text-sm text-bambu-gray">
+              {sourceFilename
+                ? t('kiriMoto.descriptionWithFile', { filename: sourceFilename })
+                : t('kiriMoto.description')}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 xl:items-end">
+            {statusMessage && (
+              <div className="flex items-center gap-2 text-xs text-bambu-gray">
+                {!loadError && <Loader2 className={`w-4 h-4 ${statusMessage === t('kiriMoto.status.modelLoaded') ? '' : 'animate-spin'}`} />}
+                <span>{statusMessage}</span>
               </div>
             )}
 
-            {!unavailable && loadError && (
-              <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                {loadError}
-              </div>
-            )}
-
-            {!unavailable && !activeEmbed && (
-              <div className="h-full flex flex-col items-center justify-center gap-4 text-center text-bambu-gray">
-                <ArrowUpRight className="w-12 h-12 text-bambu-green" />
-                <div>
-                  <p className="text-white font-medium">{t('kiriMoto.externalModeTitle')}</p>
-                  <p className="mt-1">{t('kiriMoto.externalModeDescription')}</p>
-                </div>
-                <Button onClick={() => window.open(activeLaunchUrl, '_blank', 'noopener,noreferrer')}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onClick={goBack}>
+                <ArrowLeft className="w-4 h-4" />
+                {t('kiriMoto.backToFiles')}
+              </Button>
+              <Button variant="secondary" onClick={() => navigate('/settings?tab=network')}>
+                <Settings2 className="w-4 h-4" />
+                {t('kiriMoto.settings')}
+              </Button>
+              {activeLaunchUrl && (
+                <Button variant="secondary" onClick={() => window.open(activeLaunchUrl, '_blank', 'noopener,noreferrer')}>
                   <ArrowUpRight className="w-4 h-4" />
                   {t('kiriMoto.openInNewTab')}
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
-            {!unavailable && activeEmbed && (
-              <iframe
-                ref={iframeRef}
-                src={activeLaunchUrl}
-                title={t('settings.slicerOrcaSlicer')}
-                className="h-full w-full border-0 rounded-lg bg-black"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-              />
-            )}
-          </CardContent>
-        </Card>
+      <div className="relative flex-1 min-h-0 bg-black">
+        {unavailable && (
+          <div className="flex h-full flex-col items-center justify-center gap-4 bg-bambu-dark px-4 text-center text-bambu-gray">
+            <AlertTriangle className="w-12 h-12 text-yellow-400" />
+            <div>
+              <p className="font-medium text-white">{t('kiriMoto.unavailableTitle')}</p>
+              <p className="mt-1">{t('kiriMoto.unavailableDescription')}</p>
+            </div>
+            <Button variant="secondary" onClick={() => navigate('/settings?tab=network')}>
+              <Settings2 className="w-4 h-4" />
+              {t('kiriMoto.settings')}
+            </Button>
+          </div>
+        )}
+
+        {!unavailable && loadError && (
+          <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 shadow-lg">
+            {loadError}
+          </div>
+        )}
+
+        {!unavailable && !activeEmbed && (
+          <div className="flex h-full flex-col items-center justify-center gap-4 bg-bambu-dark px-4 text-center text-bambu-gray">
+            <ArrowUpRight className="w-12 h-12 text-bambu-green" />
+            <div>
+              <p className="font-medium text-white">{t('kiriMoto.externalModeTitle')}</p>
+              <p className="mt-1">{t('kiriMoto.externalModeDescription')}</p>
+            </div>
+            <Button onClick={() => window.open(activeLaunchUrl, '_blank', 'noopener,noreferrer')}>
+              <ArrowUpRight className="w-4 h-4" />
+              {t('kiriMoto.openInNewTab')}
+            </Button>
+          </div>
+        )}
+
+        {!unavailable && activeEmbed && (
+          <iframe
+            ref={iframeRef}
+            src={activeLaunchUrl}
+            title={t('settings.slicerOrcaSlicer')}
+            className="h-full w-full border-0 bg-black"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+          />
+        )}
       </div>
     </div>
   );
