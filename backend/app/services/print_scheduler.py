@@ -128,6 +128,10 @@ class PrintScheduler:
                         skip_reasons["scheduled_future"] = skip_reasons.get("scheduled_future", 0) + 1
                         continue
 
+                if item.custom_request:
+                    skip_reasons["custom_request"] = skip_reasons.get("custom_request", 0) + 1
+                    continue
+
                 # Skip items that require manual start
                 if item.manual_start:
                     skip_reasons["manual_start"] = skip_reasons.get("manual_start", 0) + 1
@@ -1433,6 +1437,12 @@ class PrintScheduler:
 
     async def _get_job_name(self, db: AsyncSession, item: PrintQueueItem) -> str:
         """Get a human-readable name for a queue item."""
+        if item.custom_request:
+            if item.request_model_url:
+                return item.request_model_url
+            if item.requester_name:
+                return f"Custom request - {item.requester_name}"
+            return f"Custom request #{item.id}"
         if item.archive_id:
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
             archive = result.scalar_one_or_none()

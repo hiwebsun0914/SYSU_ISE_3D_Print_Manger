@@ -76,6 +76,8 @@ class Settings(BaseSettings):
 
     # API
     api_prefix: str = "/api/v1"
+    queue_contact_view_password: str = "sysuzgxytj"
+    cors_allowed_origins: list[str] = Field(default_factory=list, alias="CORS_ALLOWED_ORIGINS")
 
     # Headless slicing
     bambu_studio_cli: str = "bambu-studio"
@@ -104,6 +106,16 @@ class Settings(BaseSettings):
                 return True
             if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
                 return False
+        return value
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def normalize_cors_allowed_origins(cls, value):
+        """Accept comma-separated strings for CORS origins."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
         return value
 
 settings = Settings()

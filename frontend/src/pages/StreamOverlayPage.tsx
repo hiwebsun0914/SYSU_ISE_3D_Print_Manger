@@ -6,6 +6,7 @@ import { Layers, Clock, Timer, Printer } from 'lucide-react';
 import { api } from '../api/client';
 import type { PrinterStatus } from '../api/client';
 import { formatDuration, formatETA, type TimeFormat } from '../utils/date';
+import { getApiBaseUrl, getWebSocketBaseUrl } from '../utils/runtimeUrls';
 import { APP_LOGO_ALT, APP_LOGO_SRC, APP_TITLE } from '../constants/branding';
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
@@ -135,8 +136,7 @@ export function StreamOverlayPage() {
   useEffect(() => {
     if (!id) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/ws`;
+    const wsUrl = `${getWebSocketBaseUrl()}/api/v1/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
@@ -192,7 +192,7 @@ export function StreamOverlayPage() {
 
   const isPrinting = status.state === 'RUNNING' || status.state === 'PAUSE';
   const progress = status.progress || 0;
-  const streamUrl = `/api/v1/printers/${id}/camera/stream?fps=${config.fps}&t=${imageKey}`;
+  const streamUrl = `${getApiBaseUrl()}/printers/${id}/camera/stream?fps=${config.fps}&t=${imageKey}`;
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">

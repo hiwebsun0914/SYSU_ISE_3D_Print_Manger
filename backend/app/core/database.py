@@ -1382,6 +1382,32 @@ async def run_migrations(conn):
     except OperationalError:
         pass  # Already applied
 
+    # Migration: Add manual request fields to print_queue for queue registrations without a source file
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN custom_request BOOLEAN DEFAULT 0"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN student_id VARCHAR(64)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN requester_name VARCHAR(120)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN contact_email VARCHAR(255)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN request_model_url TEXT"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN request_notes TEXT"))
+    except OperationalError:
+        pass  # Already applied
+
     # Migration: Add NFC reader and display control columns to spoolbuddy_devices
     try:
         await conn.execute(text("ALTER TABLE spoolbuddy_devices ADD COLUMN nfc_reader_type VARCHAR(20)"))

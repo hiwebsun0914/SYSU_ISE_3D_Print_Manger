@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, or_, select, text
@@ -3890,6 +3891,15 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+if app_settings.cors_allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app_settings.cors_allowed_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # =============================================================================

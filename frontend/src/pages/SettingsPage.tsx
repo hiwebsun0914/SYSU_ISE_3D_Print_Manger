@@ -175,42 +175,6 @@ export function SettingsPage() {
     showToast(t('settings.toast.settingsSaved'), 'success');
   };
 
-  const handleResetSidebarOrder = () => {
-    localStorage.removeItem('sidebarOrder');
-    window.location.reload();
-  };
-
-  const isDefaultSidebarEnabled = !!localSettings?.default_sidebar_order;
-
-  const handleToggleDefaultSidebarOrder = async (enabled: boolean) => {
-    try {
-      if (enabled) {
-        let orderArr: string[];
-        const stored = localStorage.getItem('sidebarOrder');
-        try {
-          orderArr = stored ? JSON.parse(stored) : defaultNavItems.map(i => i.id);
-        } catch {
-          orderArr = defaultNavItems.map(i => i.id);
-        }
-        if (!Array.isArray(orderArr) || orderArr.length === 0) {
-          orderArr = defaultNavItems.map(i => i.id);
-        }
-        const payload = JSON.stringify({ order: orderArr });
-        await api.updateSettings({ default_sidebar_order: payload });
-        setLocalSettings(prev => prev ? { ...prev, default_sidebar_order: payload } : prev);
-        showToast(t('settings.sidebarDefaultSet'), 'success');
-      } else {
-        await api.updateSettings({ default_sidebar_order: '' });
-        setLocalSettings(prev => prev ? { ...prev, default_sidebar_order: '' } : prev);
-        showToast(t('settings.sidebarDefaultCleared'), 'success');
-      }
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
-      queryClient.invalidateQueries({ queryKey: ['default-sidebar-order'] });
-    } catch {
-      showToast(t('settings.sidebarDefaultFailed'), 'error');
-    }
-  };
-
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: api.getSettings,
@@ -1206,35 +1170,6 @@ export function SettingsPage() {
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.preferredSlicerDescription')}
                 </p>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-white">{t('settings.sidebarOrder')}</p>
-                  <p className="text-sm text-bambu-gray">
-                    {t('settings.sidebarOrderDescription')}
-                    {authEnabled && hasPermission('settings:update') && ` ${t('settings.sidebarOrderSetDefaultHint')}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleResetSidebarOrder}
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    {t('settings.reset')}
-                  </Button>
-                  {authEnabled && hasPermission('settings:update') && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-bambu-gray whitespace-nowrap">{t('settings.setDefault')}</span>
-                      <Toggle
-                        checked={isDefaultSidebarEnabled}
-                        onChange={handleToggleDefaultSidebarOrder}
-                        disabled={isLoading}
-                      />
-                    </div>
-                  )}
-                </div>
               </div>
             </CardContent>
           </Card>

@@ -24,6 +24,12 @@ class PrintQueueItemCreate(BaseModel):
     # Either archive_id OR library_file_id must be provided
     archive_id: int | None = None
     library_file_id: int | None = None
+    custom_request: bool = False
+    student_id: str | None = None
+    requester_name: str | None = None
+    contact_email: str | None = None
+    request_model_url: str | None = None
+    request_notes: str | None = None
     scheduled_time: datetime | None = None  # None = ASAP (next when idle)
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
@@ -47,6 +53,11 @@ class PrintQueueItemUpdate(BaseModel):
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
     filament_overrides: list[dict] | None = None  # Filament overrides for model-based assignment
+    student_id: str | None = None
+    requester_name: str | None = None
+    contact_email: str | None = None
+    request_model_url: str | None = None
+    request_notes: str | None = None
     position: int | None = None
     scheduled_time: datetime | None = None
     require_previous_success: bool | None = None
@@ -73,6 +84,13 @@ class PrintQueueItemResponse(BaseModel):
     waiting_reason: str | None = None  # Why a model-based job hasn't started yet
     archive_id: int | None  # None if library_file_id is set (archive created at print start)
     library_file_id: int | None  # For queue items from library files
+    custom_request: bool = False
+    student_id: str | None = None
+    requester_name: str | None = None
+    contact_email: str | None = None
+    contact_details_hidden: bool = False
+    request_model_url: str | None = None
+    request_notes: str | None = None
     position: int
     scheduled_time: UTCDatetime
     require_previous_success: bool
@@ -149,3 +167,15 @@ class PrintQueueBulkUpdateResponse(BaseModel):
     updated_count: int
     skipped_count: int  # Items that were not pending
     message: str
+
+
+class PrintQueueItemStatusUpdate(BaseModel):
+    status: Literal["pending", "printing", "completed"]
+
+
+class QueueContactAccessRequest(BaseModel):
+    password: str
+
+
+class QueueContactAccessResponse(BaseModel):
+    success: bool

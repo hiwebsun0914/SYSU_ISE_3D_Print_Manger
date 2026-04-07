@@ -23,6 +23,7 @@ import {
   Clock,
   Trash2,
   Play,
+  Plus,
   X,
   CheckCircle,
   XCircle,
@@ -48,6 +49,9 @@ import {
   User,
   Pause,
   Weight,
+  Mail,
+  EyeOff,
+  Lock,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
@@ -59,9 +63,40 @@ import { PrintModal } from '../components/PrintModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 
+const MAKERWORLD_URL_PREFIX = 'https://makerworld.com.cn/zh/';
+const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function formatWeight(g: number, useKg = false): string {
   if (useKg && g >= 1000) return `${(g / 1000).toFixed(1)}kg`;
   return `${Math.round(g)}g`;
+}
+
+function isValidContactEmail(email: string): boolean {
+  return CONTACT_EMAIL_RE.test(email.trim());
+}
+
+function getCustomRequestTitle(item: PrintQueueItem, fallbackTitle: string): string {
+  if (!item.request_model_url) return fallbackTitle;
+
+  try {
+    const pathname = new URL(item.request_model_url).pathname;
+    const segments = pathname.split('/').filter(Boolean);
+    const modelsIndex = segments.findIndex(segment => segment === 'models');
+    const rawSlug = modelsIndex >= 0 ? segments[modelsIndex + 1] : segments[segments.length - 1];
+    if (!rawSlug) return fallbackTitle;
+
+    const decoded = decodeURIComponent(rawSlug).replace(/^\d+-/, '').replace(/[-_]+/g, ' ').trim();
+    return decoded || rawSlug;
+  } catch {
+    return fallbackTitle;
+  }
+}
+
+function getQueueItemDisplayName(item: PrintQueueItem, fallbackCustomTitle: string): string {
+  if (item.custom_request) {
+    return getCustomRequestTitle(item, fallbackCustomTitle);
+  }
+  return item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`;
 }
 
 function StatusBadge({ status, waitingReason, printerState, t }: { status: PrintQueueItem['status']; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
@@ -228,6 +263,157 @@ function BulkEditModal({
   );
 }
 
+function QueueRequestModal({
+  item,
+  onClose,
+  onSubmit,
+  isSaving,
+  t,
+}: {
+  item?: PrintQueueItem | null;
+  onClose: () => void;
+  onSubmit: (data: {
+    student_id: string;
+    requester_name: string;
+    contact_email: string;
+    request_model_url: string;
+    request_notes: string;
+  }) => void;
+  isSaving: boolean;
+  t: (key: string) => string;
+}) {
+  const [studentId, setStudentId] = useState(item?.student_id ?? '');
+  const [requesterName, setRequesterName] = useState(item?.requester_name ?? '');
+  const [contactEmail, setContactEmail] = useState(item?.contact_email ?? '');
+  const [requestModelUrl, setRequestModelUrl] = useState(item?.request_model_url ?? '');
+  const [requestNotes, setRequestNotes] = useState(item?.request_notes ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStudentId(item?.student_id ?? '');
+    setRequesterName(item?.requester_name ?? '');
+    setContactEmail(item?.contact_email ?? '');
+    setRequestModelUrl(item?.request_model_url ?? '');
+    setRequestNotes(item?.request_notes ?? '');
+    setError(null);
+  }, [item]);
+
+  const handleSubmit = () => {
+    const trimmedStudentId = studentId.trim();
+    const trimmedRequesterName = requesterName.trim();
+    const trimmedContactEmail = contactEmail.trim();
+    const trimmedRequestModelUrl = requestModelUrl.trim();
+    const trimmedRequestNotes = requestNotes.trim();
+
+    if (!trimmedStudentId || !trimmedRequesterName || !trimmedContactEmail || !trimmedRequestModelUrl) {
+      setError(t('queue.request.requiredError'));
+      return;
+    }
+
+    if (!isValidContactEmail(trimmedContactEmail)) {
+      setError(t('queue.request.emailError'));
+      return;
+    }
+
+    if (!trimmedRequestModelUrl.startsWith(MAKERWORLD_URL_PREFIX)) {
+      setError(t('queue.request.urlError'));
+      return;
+    }
+
+    setError(null);
+    onSubmit({
+      student_id: trimmedStudentId,
+      requester_name: trimmedRequesterName,
+      contact_email: trimmedContactEmail,
+      request_model_url: trimmedRequestModelUrl,
+      request_notes: trimmedRequestNotes,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-bambu-dark-secondary rounded-xl border border-bambu-dark-tertiary w-full max-w-xl">
+        <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
+          <h2 className="text-lg font-semibold text-white">
+            {item ? t('queue.request.edit') : t('queue.request.add')}
+          </h2>
+          <button onClick={onClose} className="p-1 hover:bg-bambu-dark rounded">
+            <X className="w-5 h-5 text-bambu-gray" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <p className="text-sm text-bambu-gray">{t('queue.request.description')}</p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white mb-2">{t('queue.request.studentId')}</label>
+              <input
+                value={studentId}
+                onChange={(e) => setStudentId(e.target.value)}
+                className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white mb-2">{t('queue.request.requesterName')}</label>
+              <input
+                value={requesterName}
+                onChange={(e) => setRequesterName(e.target.value)}
+                className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">{t('queue.request.contactEmail')}</label>
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder={t('queue.request.contactEmailPlaceholder')}
+              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">{t('queue.request.modelUrl')}</label>
+            <input
+              value={requestModelUrl}
+              onChange={(e) => setRequestModelUrl(e.target.value)}
+              placeholder={t('queue.request.urlPlaceholder')}
+              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+            />
+            <p className="text-xs text-bambu-gray mt-2">{t('queue.request.urlHint')}</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">{t('queue.request.notes')}</label>
+            <textarea
+              value={requestNotes}
+              onChange={(e) => setRequestNotes(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none resize-y"
+            />
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 p-4 border-t border-bambu-dark-tertiary">
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={handleSubmit} disabled={isSaving}>
+            {isSaving ? t('common.saving') : item ? t('queue.request.save') : t('queue.request.submit')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Tri-state toggle for bulk edit (unchanged / on / off)
 function TriStateToggle({
   label,
@@ -282,8 +468,10 @@ function SortableQueueItem({
   onStop,
   onRequeue,
   onStart,
+  onSetCustomStatus,
   timeFormat = 'system',
   isSelected = false,
+  isUpdatingStatus = false,
   onToggleSelect,
   hasPermission,
   canModify,
@@ -298,43 +486,38 @@ function SortableQueueItem({
   onStop: () => void;
   onRequeue: () => void;
   onStart: () => void;
+  onSetCustomStatus?: (status: 'pending' | 'printing' | 'completed') => void;
   timeFormat?: TimeFormat;
   isSelected?: boolean;
+  isUpdatingStatus?: boolean;
   onToggleSelect?: () => void;
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
   printerState?: string | null;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
-  // Fetch printer status every 30 seconds while printing to monitor progress
   const { data: status } = useQuery({
     queryKey: ['printerStatus', item.printer_id],
     queryFn: () => api.getPrinterStatus(item.printer_id!),
     refetchInterval: 30000,
-    enabled: item.printer_id != null && printerState === 'printing',
+    enabled: !item.custom_request && item.printer_id != null && printerState === 'printing',
   });
 
-  // Determine if we're printing a library file
   const isLibraryFile = !!item.library_file_id && !item.archive_id;
-  // Fetch archive plate details
   const { data: archivePlatesData } = useQuery({
     queryKey: ['archive-plates', item.archive_id],
     queryFn: () => api.getArchivePlates(item.archive_id!),
-    enabled: !!item.archive_id && !isLibraryFile,
+    enabled: !item.custom_request && !!item.archive_id && !isLibraryFile,
   });
-
-  // Fetch library file plate details
   const { data: libraryPlatesData } = useQuery({
     queryKey: ['library-file-plates', item.library_file_id],
     queryFn: () => api.getLibraryFilePlates(item.library_file_id!),
-    enabled: isLibraryFile && !!item.library_file_id,
+    enabled: !item.custom_request && isLibraryFile && !!item.library_file_id,
   });
 
-  // Combine plates data from either source
   const platesData = isLibraryFile ? libraryPlatesData : archivePlatesData;
   const plates = platesData?.plates ?? [];
-
-  const canReorder = hasPermission('queue:reorder');
+  const canReorder = hasPermission('queue:reorder') && !item.custom_request;
   const {
     attributes,
     listeners,
@@ -352,8 +535,12 @@ function SortableQueueItem({
   const isPrinting = item.status === 'printing';
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
-
-  const isMobileSelectable = isPending && onToggleSelect;
+  const isMobileSelectable = isPending && !item.custom_request && !!onToggleSelect;
+  const displayName = getQueueItemDisplayName(item, t('queue.request.defaultTitle'));
+  const canEdit = canModify('queue', 'update', item.created_by_id);
+  const canDelete = canModify('queue', 'delete', item.created_by_id);
+  const canEditCustomRequest = canEdit && !item.contact_details_hidden;
+  const customStatusValue = item.status === 'printing' || item.status === 'completed' ? item.status : 'pending';
 
   return (
     <div
@@ -368,23 +555,19 @@ function SortableQueueItem({
         ${isMobileSelectable ? 'sm:cursor-default' : ''}
       `}
       onClick={isMobileSelectable ? () => {
-        if (window.innerWidth < 640) onToggleSelect();
+        if (window.innerWidth < 640) onToggleSelect?.();
       } : undefined}
     >
-      {/* Mobile selected left accent bar */}
       {isMobileSelectable && isSelected && (
         <div className="sm:hidden absolute left-0 top-3 bottom-3 w-1 rounded-full bg-bambu-green" />
       )}
 
       <div className="flex items-start sm:items-center gap-2 sm:gap-4 p-3 sm:p-4">
-        {/* Mobile selection indicator — left accent bar only, no tick */}
-
-        {/* Selection checkbox for pending items - hidden on mobile, tap card instead */}
-        {isPending && onToggleSelect && (
+        {isPending && !item.custom_request && onToggleSelect && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onToggleSelect();
+              onToggleSelect?.();
             }}
             className={`hidden sm:flex items-center justify-center w-6 h-6 rounded border transition-colors shrink-0 ${
               isSelected
@@ -396,15 +579,20 @@ function SortableQueueItem({
           </button>
         )}
 
-        {/* Drag handle or position number - hidden on mobile */}
         {isPending ? (
-          <div
-            {...attributes}
-            {...listeners}
-            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
-          >
-            <GripVertical className="w-4 h-4 text-bambu-gray" />
-          </div>
+          canReorder ? (
+            <div
+              {...attributes}
+              {...listeners}
+              className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
+            >
+              <GripVertical className="w-4 h-4 text-bambu-gray" />
+            </div>
+          ) : (
+            <div className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark text-bambu-gray text-sm font-medium shrink-0">
+              #{position ?? item.position}
+            </div>
+          )
         ) : position !== undefined ? (
           <div className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark text-bambu-gray text-sm font-medium shrink-0">
             #{position}
@@ -413,7 +601,6 @@ function SortableQueueItem({
           <div className="hidden sm:block w-8 shrink-0" />
         )}
 
-        {/* Thumbnail - use plate-specific thumbnail if plate_id is set */}
         <div className="w-10 h-10 sm:w-14 sm:h-14 flex-shrink-0 bg-bambu-dark rounded-lg overflow-hidden">
           {item.archive_thumbnail ? (
             <img
@@ -442,14 +629,23 @@ function SortableQueueItem({
           )}
         </div>
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-sm sm:text-base text-white font-medium truncate">
-              {item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`}
-              {(platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
+              {displayName}
+              {!item.custom_request && (platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
             </p>
-            {item.archive_id ? (
+            {item.custom_request && item.request_model_url ? (
+              <a
+                href={item.request_model_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
+                title={t('queue.request.openLink')}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : item.archive_id ? (
               <Link
                 to={`/archives?highlight=${item.archive_id}`}
                 className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
@@ -469,27 +665,56 @@ function SortableQueueItem({
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-bambu-gray">
-            <span className={`flex items-center gap-1 sm:gap-1.5 ${item.printer_id === null && !item.target_model ? 'text-orange-400' : ''} ${item.target_model ? 'text-blue-400' : ''}`}>
-              <Printer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="truncate max-w-[120px] sm:max-w-none">
-              {item.target_model
-                ? `${t('queue.filter.any')} ${item.target_model}${item.target_location ? ` @ ${item.target_location}` : ''}${item.required_filament_types?.length ? ` (${item.required_filament_types.join(', ')})` : ''}`
-                : item.printer_id === null
-                  ? t('queue.filter.unassigned')
-                  : (item.printer_name || `${t('common.printer')} #${item.printer_id}`)}
-              </span>
-            </span>
-            {item.print_time_seconds && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Timer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatDuration(item.print_time_seconds)}
-              </span>
-            )}
-            {item.filament_used_grams && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Weight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatWeight(item.filament_used_grams)}
-              </span>
+            {item.custom_request ? (
+              <>
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <User className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  {t('queue.request.studentIdValue', { value: item.student_id || '-' })}
+                </span>
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <User className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  {t('queue.request.requesterNameValue', {
+                    value: item.contact_details_hidden ? t('queue.request.hiddenValue') : (item.requester_name || '-'),
+                  })}
+                </span>
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <Mail className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  {t('queue.request.contactEmailValue', {
+                    value: item.contact_details_hidden ? t('queue.request.hiddenValue') : (item.contact_email || '-'),
+                  })}
+                </span>
+                <span className={`flex items-center gap-1 sm:gap-1.5 ${item.printer_id === null ? 'text-orange-400' : ''}`}>
+                  <Printer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  {item.printer_id === null
+                    ? t('queue.filter.unassigned')
+                    : (item.printer_name || `${t('common.printer')} #${item.printer_id}`)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className={`flex items-center gap-1 sm:gap-1.5 ${item.printer_id === null && !item.target_model ? 'text-orange-400' : ''} ${item.target_model ? 'text-blue-400' : ''}`}>
+                  <Printer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span className="truncate max-w-[120px] sm:max-w-none">
+                  {item.target_model
+                    ? `${t('queue.filter.any')} ${item.target_model}${item.target_location ? ` @ ${item.target_location}` : ''}${item.required_filament_types?.length ? ` (${item.required_filament_types.join(', ')})` : ''}`
+                    : item.printer_id === null
+                      ? t('queue.filter.unassigned')
+                      : (item.printer_name || `${t('common.printer')} #${item.printer_id}`)}
+                  </span>
+                </span>
+                {item.print_time_seconds && (
+                  <span className="flex items-center gap-1 sm:gap-1.5">
+                    <Timer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    {formatDuration(item.print_time_seconds)}
+                  </span>
+                )}
+                {item.filament_used_grams && (
+                  <span className="flex items-center gap-1 sm:gap-1.5">
+                    <Weight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    {formatWeight(item.filament_used_grams)}
+                  </span>
+                )}
+              </>
             )}
             {item.created_by_username && (
               <span className="hidden sm:flex items-center gap-1.5" title={t('queue.addedBy', { name: item.created_by_username })}>
@@ -497,7 +722,7 @@ function SortableQueueItem({
                 {item.created_by_username}
               </span>
             )}
-            {isPending && !item.manual_start && (
+            {isPending && !item.manual_start && !item.custom_request && (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {item.scheduled_time
@@ -509,9 +734,12 @@ function SortableQueueItem({
             )}
           </div>
 
-          {/* Options badges */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-            {item.manual_start && (
+            {item.custom_request ? (
+              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-teal-500/10 text-teal-400 rounded-full border border-teal-500/20">
+                {t('queue.request.badge')}
+              </span>
+            ) : item.manual_start && (
               <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1">
                 <Hand className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                 {t('queue.badges.staged')}
@@ -530,8 +758,13 @@ function SortableQueueItem({
             )}
           </div>
 
-          {/* Progress bar for printing items - TODO: integrate with WebSocket */}
-          {isPrinting && status && (
+          {item.custom_request && item.request_notes && (
+            <p className="text-[10px] sm:text-xs text-bambu-gray mt-1.5 sm:mt-2 whitespace-pre-wrap break-words">
+              {item.request_notes}
+            </p>
+          )}
+
+          {isPrinting && status && !item.custom_request && (
             <div className="mt-2 sm:mt-3">
               <div className="flex items-center justify-between text-xs sm:text-sm">
                 <div className="flex-1 bg-bambu-dark-tertiary rounded-full h-1.5 sm:h-2 mr-3">
@@ -564,15 +797,13 @@ function SortableQueueItem({
             </div>
           )}
 
-          {/* Waiting reason for model-based assignments */}
-          {item.waiting_reason && item.status === 'pending' && (
+          {item.waiting_reason && item.status === 'pending' && !item.custom_request && (
             <p className="text-[10px] sm:text-xs text-purple-400 mt-1.5 sm:mt-2 flex items-start gap-1">
               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <span>{item.waiting_reason}</span>
             </p>
           )}
 
-          {/* Error message */}
           {item.error_message && (
             <p className="text-[10px] sm:text-xs text-red-400 mt-1.5 sm:mt-2 flex items-center gap-1">
               <AlertCircle className="w-3 h-3" />
@@ -581,81 +812,126 @@ function SortableQueueItem({
           )}
         </div>
 
-        {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           <StatusBadge status={item.status} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
-            {isPrinting && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onStop}
-                disabled={!hasPermission('printers:control')}
-                title={!hasPermission('printers:control') ? t('queue.permissions.noStopPrint') : t('queue.actions.stopPrint')}
-                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
-              >
-                <StopCircle className="w-4 h-4" />
-              </Button>
-            )}
-            {isPending && (
+            {item.custom_request ? (
               <>
-                {item.manual_start && (
+                <select
+                  value={customStatusValue}
+                  onChange={(e) => onSetCustomStatus?.(e.target.value as 'pending' | 'printing' | 'completed')}
+                  disabled={!canEdit || isUpdatingStatus}
+                  title={!canEdit ? t('queue.permissions.noStatusChange') : t('queue.request.status')}
+                  className="px-2 py-1.5 text-xs sm:text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
+                >
+                  <option value="pending">{t('queue.status.pending')}</option>
+                  <option value="printing">{t('queue.status.printing')}</option>
+                  <option value="completed">{t('queue.status.completed')}</option>
+                </select>
+                {isPending && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={onStart}
-                    disabled={!hasPermission('printers:control')}
-                    title={!hasPermission('printers:control') ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
-                    className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10 p-1.5 sm:p-2"
+                    onClick={onEdit}
+                    disabled={!canEditCustomRequest}
+                    title={
+                      item.contact_details_hidden
+                        ? t('queue.permissions.unlockContactsFirst')
+                        : !canEdit
+                          ? t('queue.permissions.noEdit')
+                          : t('common.edit')
+                    }
+                    className="p-1.5 sm:p-2"
                   >
-                    <Play className="w-4 h-4" />
+                    <Pencil className="w-4 h-4" />
                   </Button>
                 )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={onEdit}
-                  disabled={!canModify('queue', 'update', item.created_by_id)}
-                  title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noEdit') : t('common.edit')}
-                  className="p-1.5 sm:p-2"
-                >
-                  <Pencil className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onCancel}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noCancel') : t('common.cancel')}
-                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </>
-            )}
-            {isHistory && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onRequeue}
-                  disabled={!hasPermission('queue:create')}
-                  title={!hasPermission('queue:create') ? t('queue.permissions.noRequeue') : t('queue.actions.requeue')}
-                  className="text-bambu-green hover:text-bambu-green/80 hover:bg-bambu-green/10 p-1.5 sm:p-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
                   onClick={onRemove}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noRemove') : t('common.remove')}
+                  disabled={!canDelete}
+                  title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
                   className="p-1.5 sm:p-2"
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>
+              </>
+            ) : (
+              <>
+                {isPrinting && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onStop}
+                    disabled={!hasPermission('printers:control')}
+                    title={!hasPermission('printers:control') ? t('queue.permissions.noStopPrint') : t('queue.actions.stopPrint')}
+                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
+                  >
+                    <StopCircle className="w-4 h-4" />
+                  </Button>
+                )}
+                {isPending && (
+                  <>
+                    {item.manual_start && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onStart}
+                        disabled={!hasPermission('printers:control')}
+                        title={!hasPermission('printers:control') ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
+                        className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10 p-1.5 sm:p-2"
+                      >
+                        <Play className="w-4 h-4" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onEdit}
+                      disabled={!canEdit}
+                      title={!canEdit ? t('queue.permissions.noEdit') : t('common.edit')}
+                      className="p-1.5 sm:p-2"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onCancel}
+                      disabled={!canDelete}
+                      title={!canDelete ? t('queue.permissions.noCancel') : t('common.cancel')}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
+                {isHistory && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onRequeue}
+                      disabled={!hasPermission('queue:create')}
+                      title={!hasPermission('queue:create') ? t('queue.permissions.noRequeue') : t('queue.actions.requeue')}
+                      className="text-bambu-green hover:text-bambu-green/80 hover:bg-bambu-green/10 p-1.5 sm:p-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onRemove}
+                      disabled={!canDelete}
+                      title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
+                      className="p-1.5 sm:p-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -674,6 +950,11 @@ export function QueuePage() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [editingRequestItem, setEditingRequestItem] = useState<PrintQueueItem | null>(null);
+  const [contactRevealPassword, setContactRevealPassword] = useState<string | null>(null);
+  const [showContactUnlockModal, setShowContactUnlockModal] = useState(false);
+  const [contactPasswordInput, setContactPasswordInput] = useState('');
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -729,14 +1010,70 @@ export function QueuePage() {
   const timeFormat: TimeFormat = settings?.time_format || 'system';
 
   const { data: queue, isLoading } = useQuery({
-    queryKey: ['queue', filterPrinter, filterStatus],
-    queryFn: () => api.getQueue(filterPrinter || undefined, filterStatus || undefined),
+    queryKey: ['queue', filterPrinter, filterStatus, !!contactRevealPassword],
+    queryFn: () => api.getQueue(
+      filterPrinter ?? undefined,
+      filterStatus || undefined,
+      undefined,
+      contactRevealPassword ?? undefined,
+    ),
     refetchInterval: 5000,
   });
 
   const { data: printers } = useQuery({
     queryKey: ['printers'],
     queryFn: () => api.getPrinters(),
+  });
+
+  const createRequestMutation = useMutation({
+    mutationFn: (data: { student_id: string; requester_name: string; contact_email: string; request_model_url: string; request_notes: string }) =>
+      api.addToQueue({
+        custom_request: true,
+        student_id: data.student_id,
+        requester_name: data.requester_name,
+        contact_email: data.contact_email,
+        request_model_url: data.request_model_url,
+        request_notes: data.request_notes,
+        manual_start: true,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      setShowRequestModal(false);
+      showToast(t('queue.toast.requestCreated'));
+    },
+    onError: () => showToast(t('queue.toast.requestCreateFailed'), 'error'),
+  });
+
+  const updateRequestMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: { student_id: string; requester_name: string; contact_email: string; request_model_url: string; request_notes: string } }) =>
+      api.updateQueueItem(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      setEditingRequestItem(null);
+      showToast(t('queue.toast.requestUpdated'));
+    },
+    onError: () => showToast(t('queue.toast.requestUpdateFailed'), 'error'),
+  });
+
+  const updateRequestStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: 'pending' | 'printing' | 'completed' }) =>
+      api.updateCustomQueueItemStatus(id, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      showToast(t('queue.toast.statusUpdated'));
+    },
+    onError: () => showToast(t('queue.toast.statusUpdateFailed'), 'error'),
+  });
+
+  const unlockContactsMutation = useMutation({
+    mutationFn: (password: string) => api.validateQueueContactAccess(password),
+    onSuccess: (_, password) => {
+      setContactRevealPassword(password);
+      setContactPasswordInput('');
+      setShowContactUnlockModal(false);
+      showToast(t('queue.toast.contactsUnlocked'));
+    },
+    onError: () => showToast(t('queue.toast.unlockContactsFailed'), 'error'),
   });
 
   const cancelMutation = useMutation({
@@ -878,8 +1215,8 @@ export function QueuePage() {
     return [...items].sort((a, b) => {
       let cmp: number;
       if (pendingSortBy === 'name') {
-        const aName = a.archive_name || a.library_file_name || '';
-        const bName = b.archive_name || b.library_file_name || '';
+        const aName = getQueueItemDisplayName(a, t('queue.request.defaultTitle'));
+        const bName = getQueueItemDisplayName(b, t('queue.request.defaultTitle'));
         cmp = aName.localeCompare(bName);
       } else if (pendingSortBy === 'printer') {
         cmp = (a.printer_name || '').localeCompare(b.printer_name || '');
@@ -891,10 +1228,15 @@ export function QueuePage() {
       }
       return pendingSortAsc ? cmp : -cmp;
     });
-  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, t]);
+
+  const selectablePendingItems = useMemo(
+    () => pendingItems.filter(item => !item.custom_request),
+    [pendingItems]
+  );
 
   const handleSelectAll = () => {
-    const allPendingIds = pendingItems.map(i => i.id);
+    const allPendingIds = selectablePendingItems.map(i => i.id);
     if (selectedItems.length === allPendingIds.length) {
       setSelectedItems([]);
     } else {
@@ -948,8 +1290,8 @@ export function QueuePage() {
     return [...items].sort((a, b) => {
       let cmp: number;
       if (historySortBy === 'name') {
-        const aName = a.archive_name || a.library_file_name || '';
-        const bName = b.archive_name || b.library_file_name || '';
+        const aName = getQueueItemDisplayName(a, t('queue.request.defaultTitle'));
+        const bName = getQueueItemDisplayName(b, t('queue.request.defaultTitle'));
         cmp = aName.localeCompare(bName);
       } else if (historySortBy === 'printer') {
         cmp = (a.printer_name || '').localeCompare(b.printer_name || '');
@@ -959,7 +1301,7 @@ export function QueuePage() {
       }
       return historySortAsc ? -cmp : cmp;
     });
-  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation, t]);
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
@@ -998,6 +1340,29 @@ export function QueuePage() {
             {t('queue.title')}
           </h1>
           <p className="text-bambu-gray mt-1">{t('queue.subtitle')}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              if (contactRevealPassword) {
+                setContactRevealPassword(null);
+                setContactPasswordInput('');
+                showToast(t('queue.toast.contactsHidden'));
+              } else {
+                setShowContactUnlockModal(true);
+              }
+            }}
+          >
+            {contactRevealPassword ? <EyeOff className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+            {contactRevealPassword ? t('queue.request.hideContacts') : t('queue.request.unlockContacts')}
+          </Button>
+          {hasPermission('queue:create') && (
+            <Button onClick={() => setShowRequestModal(true)}>
+              <Plus className="w-4 h-4" />
+              {t('queue.request.add')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1161,13 +1526,15 @@ export function QueuePage() {
                   <SortableQueueItem
                     key={item.id}
                     item={item}
-                    onEdit={() => {}}
+                    onEdit={() => item.custom_request ? setEditingRequestItem(item) : undefined}
                     onCancel={() => {}}
-                    onRemove={() => {}}
+                    onRemove={() => setConfirmAction({ type: 'remove', item })}
                     onStop={() => setConfirmAction({ type: 'stop', item })}
                     onRequeue={() => {}}
                     onStart={() => {}}
+                    onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
                     timeFormat={timeFormat}
+                    isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                     hasPermission={hasPermission}
                     canModify={canModify}
                     printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
@@ -1223,12 +1590,12 @@ export function QueuePage() {
                   onClick={handleSelectAll}
                   className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm"
                 >
-                  {selectedItems.length === pendingItems.length && pendingItems.length > 0 ? (
+                  {selectedItems.length === selectablePendingItems.length && selectablePendingItems.length > 0 ? (
                     <CheckSquare className="w-4 h-4 text-bambu-green" />
                   ) : (
                     <Square className="w-4 h-4" />
                   )}
-                  {selectedItems.length === pendingItems.length && pendingItems.length > 0 ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
+                  {selectedItems.length === selectablePendingItems.length && selectablePendingItems.length > 0 ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
                 </Button>
                 {selectedItems.length > 0 && (
                   <>
@@ -1277,14 +1644,16 @@ export function QueuePage() {
                         key={item.id}
                         item={item}
                         position={index + 1}
-                        onEdit={() => setEditItem(item)}
+                        onEdit={() => item.custom_request ? setEditingRequestItem(item) : setEditItem(item)}
                         onCancel={() => setConfirmAction({ type: 'cancel', item })}
-                        onRemove={() => {}}
+                        onRemove={() => setConfirmAction({ type: 'remove', item })}
                         onStop={() => {}}
                         onRequeue={() => {}}
                         onStart={() => startMutation.mutate(item.id)}
+                        onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
                         timeFormat={timeFormat}
                         isSelected={selectedItems.includes(item.id)}
+                        isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                         onToggleSelect={() => handleToggleSelect(item.id)}
                         hasPermission={hasPermission}
                         canModify={canModify}
@@ -1335,13 +1704,15 @@ export function QueuePage() {
                     key={item.id}
                     item={item}
                     position={index + 1}
-                    onEdit={() => {}}
+                    onEdit={() => item.custom_request ? setEditingRequestItem(item) : undefined}
                     onCancel={() => {}}
                     onRemove={() => setConfirmAction({ type: 'remove', item })}
                     onStop={() => {}}
                     onRequeue={() => setRequeueItem(item)}
                     onStart={() => {}}
+                    onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
                     timeFormat={timeFormat}
+                    isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                     hasPermission={hasPermission}
                     canModify={canModify}
                     t={t}
@@ -1350,6 +1721,83 @@ export function QueuePage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {(showRequestModal || editingRequestItem) && (
+        <QueueRequestModal
+          item={editingRequestItem}
+          onClose={() => {
+            setShowRequestModal(false);
+            setEditingRequestItem(null);
+          }}
+          onSubmit={(data) => {
+            if (editingRequestItem) {
+              updateRequestMutation.mutate({ id: editingRequestItem.id, data });
+            } else {
+              createRequestMutation.mutate(data);
+            }
+          }}
+          isSaving={createRequestMutation.isPending || updateRequestMutation.isPending}
+          t={t}
+        />
+      )}
+
+      {showContactUnlockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-bambu-dark-secondary rounded-xl border border-bambu-dark-tertiary w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
+              <h2 className="text-lg font-semibold text-white">{t('queue.request.unlockTitle')}</h2>
+              <button
+                onClick={() => {
+                  if (!unlockContactsMutation.isPending) {
+                    setShowContactUnlockModal(false);
+                    setContactPasswordInput('');
+                  }
+                }}
+                className="p-1 hover:bg-bambu-dark rounded"
+              >
+                <X className="w-5 h-5 text-bambu-gray" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-bambu-gray">{t('queue.request.unlockDescription')}</p>
+              <div>
+                <label className="block text-sm font-medium text-white mb-2">{t('queue.request.unlockPassword')}</label>
+                <input
+                  type="password"
+                  value={contactPasswordInput}
+                  onChange={(e) => setContactPasswordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && contactPasswordInput.trim()) {
+                      unlockContactsMutation.mutate(contactPasswordInput.trim());
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t border-bambu-dark-tertiary">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowContactUnlockModal(false);
+                  setContactPasswordInput('');
+                }}
+                disabled={unlockContactsMutation.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={() => unlockContactsMutation.mutate(contactPasswordInput.trim())}
+                disabled={unlockContactsMutation.isPending || !contactPasswordInput.trim()}
+              >
+                {unlockContactsMutation.isPending ? t('common.saving') : t('queue.request.unlockSubmit')}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1386,10 +1834,10 @@ export function QueuePage() {
           }
           message={
             confirmAction.type === 'cancel'
-              ? t('queue.confirm.cancelMessage', { name: confirmAction.item.archive_name || confirmAction.item.library_file_name || t('queue.confirm.thisPrint') })
+              ? t('queue.confirm.cancelMessage', { name: getQueueItemDisplayName(confirmAction.item, t('queue.request.defaultTitle')) || t('queue.confirm.thisPrint') })
               : confirmAction.type === 'stop'
-              ? t('queue.confirm.stopMessage', { name: confirmAction.item.archive_name || confirmAction.item.library_file_name || t('queue.confirm.thisPrint') })
-              : t('queue.confirm.removeMessage', { name: confirmAction.item.archive_name || confirmAction.item.library_file_name || t('queue.confirm.thisItem') })
+              ? t('queue.confirm.stopMessage', { name: getQueueItemDisplayName(confirmAction.item, t('queue.request.defaultTitle')) || t('queue.confirm.thisPrint') })
+              : t('queue.confirm.removeMessage', { name: getQueueItemDisplayName(confirmAction.item, t('queue.request.defaultTitle')) || t('queue.confirm.thisItem') })
           }
           confirmText={
             confirmAction.type === 'cancel' ? t('queue.confirm.cancelButton') :

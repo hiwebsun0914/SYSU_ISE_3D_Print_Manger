@@ -2,12 +2,14 @@
 
 import json
 import logging
+import re
+import secrets
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,8 +28,11 @@ from backend.app.schemas.print_queue import (
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
     PrintQueueItemResponse,
+    PrintQueueItemStatusUpdate,
     PrintQueueItemUpdate,
     PrintQueueReorder,
+    QueueContactAccessRequest,
+    QueueContactAccessResponse,
 )
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
@@ -36,6 +41,46 @@ from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
+QUEUE_CONTACT_PASSWORD_HEADER = "X-Queue-Contact-Password"
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _is_valid_makerworld_url(url: str) -> bool:
+    """Allow MakerWorld China model links for manual queue requests."""
+    normalized = url.strip().lower()
+    return normalized.startswith("https://makerworld.com.cn/zh/")
+
+
+def _is_valid_contact_email(email: str) -> bool:
+    """Basic email validation for queue notification email."""
+    return bool(EMAIL_RE.match(email.strip()))
+
+
+def _contact_details_visible(request: Request) -> bool:
+    """Whether request contact fields should be revealed in API responses."""
+    password = request.headers.get(QUEUE_CONTACT_PASSWORD_HEADER)
+    if password is None:
+        return False
+    if secrets.compare_digest(password, settings.queue_contact_view_password):
+        return True
+    raise HTTPException(403, "Invalid contact details password")
+
+
+async def _get_next_pending_position(db: AsyncSession, printer_id: int | None) -> int:
+    """Get the next queue position for pending items in the same assignment bucket."""
+    if printer_id is not None:
+        result = await db.execute(
+            select(func.max(PrintQueueItem.position))
+            .where(PrintQueueItem.printer_id == printer_id)
+            .where(PrintQueueItem.status == "pending")
+        )
+    else:
+        result = await db.execute(
+            select(func.max(PrintQueueItem.position))
+            .where(PrintQueueItem.printer_id.is_(None))
+            .where(PrintQueueItem.status == "pending")
+        )
+    return (result.scalar() or 0) + 1
 
 
 def _extract_filament_types_from_3mf(file_path: Path, plate_id: int | None = None) -> list[str]:
@@ -151,7 +196,7 @@ def _extract_print_time_from_3mf(file_path: Path, plate_id: int | None = None) -
     return None
 
 
-def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
+def _enrich_response(item: PrintQueueItem, reveal_contact_details: bool = False) -> PrintQueueItemResponse:
     """Add nested archive/printer/library_file info to response."""
     # Parse ams_mapping from JSON string BEFORE model_validate
     ams_mapping_parsed = None
@@ -177,6 +222,10 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         except json.JSONDecodeError:
             filament_overrides_parsed = None
 
+    contact_details_hidden = bool(
+        item.custom_request and (item.requester_name or item.contact_email) and not reveal_contact_details
+    )
+
     # Create response with parsed ams_mapping
     item_dict = {
         "id": item.id,
@@ -188,6 +237,13 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "waiting_reason": item.waiting_reason,
         "archive_id": item.archive_id,
         "library_file_id": item.library_file_id,
+        "custom_request": item.custom_request,
+        "student_id": item.student_id,
+        "requester_name": None if contact_details_hidden else item.requester_name,
+        "contact_email": None if contact_details_hidden else item.contact_email,
+        "contact_details_hidden": contact_details_hidden,
+        "request_model_url": item.request_model_url,
+        "request_notes": item.request_notes,
         "position": item.position,
         "scheduled_time": item.scheduled_time,
         "require_previous_success": item.require_previous_success,
@@ -265,6 +321,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
 
 @router.get("/", response_model=list[PrintQueueItemResponse])
 async def list_queue(
+    request: Request,
     printer_id: int | None = Query(None, description="Filter by printer (-1 for unassigned)"),
     status: str | None = Query(None, description="Filter by status"),
     target_model: str | None = Query(
@@ -274,6 +331,7 @@ async def list_queue(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
 ):
     """List all queue items, optionally filtered by printer or status."""
+    reveal_contact_details = _contact_details_visible(request)
     query = (
         select(PrintQueueItem)
         .options(
@@ -320,11 +378,12 @@ async def list_queue(
 
     result = await db.execute(query)
     items = result.scalars().all()
-    return [_enrich_response(item) for item in items]
+    return [_enrich_response(item, reveal_contact_details=reveal_contact_details) for item in items]
 
 
 @router.post("/", response_model=PrintQueueItemResponse)
 async def add_to_queue(
+    request: Request,
     data: PrintQueueItemCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
@@ -339,8 +398,22 @@ async def add_to_queue(
             or data.target_model
         )
 
-    # Validate that either archive_id or library_file_id is provided
-    if not data.archive_id and not data.library_file_id:
+    is_custom_request = data.custom_request
+
+    if is_custom_request:
+        if not data.student_id or not data.student_id.strip():
+            raise HTTPException(400, "Student ID is required for custom requests")
+        if not data.requester_name or not data.requester_name.strip():
+            raise HTTPException(400, "Requester name is required for custom requests")
+        if not data.contact_email or not data.contact_email.strip():
+            raise HTTPException(400, "Contact email is required for custom requests")
+        if not _is_valid_contact_email(data.contact_email):
+            raise HTTPException(400, "Please provide a valid contact email")
+        if not data.request_model_url or not data.request_model_url.strip():
+            raise HTTPException(400, "MakerWorld URL is required for custom requests")
+        if not _is_valid_makerworld_url(data.request_model_url):
+            raise HTTPException(400, "Custom requests must use a MakerWorld China URL")
+    elif not data.archive_id and not data.library_file_id:
         raise HTTPException(400, "Either archive_id or library_file_id must be provided")
 
     # Cannot specify both printer_id and target_model
@@ -361,7 +434,6 @@ async def add_to_queue(
         if not result.scalars().first():
             raise HTTPException(400, f"No active printers for model: {target_model_norm}")
 
-    # Validate archive exists (if provided) and get it for filament extraction
     archive = None
     if data.archive_id:
         result = await db.execute(select(PrintArchive).where(PrintArchive.id == data.archive_id))
@@ -369,7 +441,6 @@ async def add_to_queue(
         if not archive:
             raise HTTPException(400, "Archive not found")
 
-    # Validate library file exists (if provided) and get it for filament extraction
     library_file = None
     if data.library_file_id:
         result = await db.execute(select(LibraryFile).where(LibraryFile.id == data.library_file_id))
@@ -377,10 +448,8 @@ async def add_to_queue(
         if not library_file:
             raise HTTPException(400, "Library file not found")
 
-    # Extract filament types for model-based assignment (used by scheduler for validation)
     required_filament_types = None
-    if target_model_norm:
-        # Get file path from archive or library file
+    if target_model_norm and not is_custom_request:
         file_path = None
         if archive:
             file_path = settings.base_dir / archive.file_path
@@ -394,34 +463,16 @@ async def add_to_queue(
                 required_filament_types = json.dumps(filament_types)
                 logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-    # If filament overrides are provided, update required_filament_types to match override types
     filament_overrides_json = None
     if data.filament_overrides and target_model_norm:
         filament_overrides_json = json.dumps(data.filament_overrides)
-        # Update required_filament_types from overrides so scheduler validates against overridden types
         override_types = sorted({o["type"] for o in data.filament_overrides if "type" in o})
         if override_types:
-            # Merge with existing types (overrides may only cover some slots)
             existing_types = set(json.loads(required_filament_types)) if required_filament_types else set()
-            # Replace types for overridden slots, keep others
             all_types = existing_types | set(override_types)
             required_filament_types = json.dumps(sorted(all_types))
 
-    # Get next position for this printer (or for unassigned/model-based items)
-    if data.printer_id is not None:
-        result = await db.execute(
-            select(func.max(PrintQueueItem.position))
-            .where(PrintQueueItem.printer_id == data.printer_id)
-            .where(PrintQueueItem.status == "pending")
-        )
-    else:
-        # For unassigned/model-based items, get max position across all unassigned
-        result = await db.execute(
-            select(func.max(PrintQueueItem.position))
-            .where(PrintQueueItem.printer_id.is_(None))
-            .where(PrintQueueItem.status == "pending")
-        )
-    max_pos = result.scalar() or 0
+    next_position = await _get_next_pending_position(db, data.printer_id)
 
     item = PrintQueueItem(
         printer_id=data.printer_id,
@@ -431,10 +482,16 @@ async def add_to_queue(
         filament_overrides=filament_overrides_json,
         archive_id=data.archive_id,
         library_file_id=data.library_file_id,
+        custom_request=is_custom_request,
+        student_id=data.student_id.strip() if data.student_id else None,
+        requester_name=data.requester_name.strip() if data.requester_name else None,
+        contact_email=data.contact_email.strip() if data.contact_email else None,
+        request_model_url=data.request_model_url.strip() if data.request_model_url else None,
+        request_notes=data.request_notes.strip() if data.request_notes else None,
         scheduled_time=data.scheduled_time,
         require_previous_success=data.require_previous_success,
         auto_off_after=data.auto_off_after,
-        manual_start=data.manual_start,
+        manual_start=True if is_custom_request else data.manual_start,
         ams_mapping=json.dumps(data.ams_mapping) if data.ams_mapping else None,
         plate_id=data.plate_id,
         bed_levelling=data.bed_levelling,
@@ -443,7 +500,7 @@ async def add_to_queue(
         layer_inspect=data.layer_inspect,
         timelapse=data.timelapse,
         use_ams=data.use_ams,
-        position=max_pos + 1,
+        position=next_position,
         status="pending",
         created_by_id=current_user.id if current_user else None,
     )
@@ -454,47 +511,52 @@ async def add_to_queue(
     # Load relationships for response
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
-    source_name = f"archive {data.archive_id}" if data.archive_id else f"library file {data.library_file_id}"
+    source_name = (
+        "custom request"
+        if is_custom_request
+        else f"archive {data.archive_id}"
+        if data.archive_id
+        else f"library file {data.library_file_id}"
+    )
     target_desc = data.printer_id or (f"model {target_model_norm}" if target_model_norm else "unassigned")
     logger.info("Added %s to queue for %s", source_name, target_desc)
 
-    # MQTT relay - publish queue job added
-    try:
-        from backend.app.services.mqtt_relay import mqtt_relay
+    if not is_custom_request:
+        try:
+            from backend.app.services.mqtt_relay import mqtt_relay
 
-        await mqtt_relay.on_queue_job_added(
-            job_id=item.id,
-            filename=item.archive.filename if item.archive else "",
-            printer_id=item.printer_id,
-            printer_name=item.printer.name if item.printer else None,
-        )
-    except Exception:
-        pass  # Don't fail queue add if MQTT fails
+            await mqtt_relay.on_queue_job_added(
+                job_id=item.id,
+                filename=item.archive.filename if item.archive else "",
+                printer_id=item.printer_id,
+                printer_name=item.printer.name if item.printer else None,
+            )
+        except Exception:
+            pass  # Don't fail queue add if MQTT fails
 
-    # Send notification for job added
-    try:
-        job_name = (
-            item.archive.filename
-            if item.archive
-            else item.library_file.filename
-            if item.library_file
-            else f"Job #{item.id}"
-        )
-        job_name = job_name.replace(".gcode.3mf", "").replace(".3mf", "")
-        target = (
-            item.printer.name if item.printer else (f"Any {item.target_model}" if target_model_norm else "Unassigned")
-        )
-        await notification_service.on_queue_job_added(
-            job_name=job_name,
-            target=target,
-            db=db,
-            printer_id=item.printer_id,
-            printer_name=item.printer.name if item.printer else None,
-        )
-    except Exception:
-        pass  # Don't fail queue add if notification fails
+        try:
+            job_name = (
+                item.archive.filename
+                if item.archive
+                else item.library_file.filename
+                if item.library_file
+                else f"Job #{item.id}"
+            )
+            job_name = job_name.replace(".gcode.3mf", "").replace(".3mf", "")
+            target = (
+                item.printer.name if item.printer else (f"Any {item.target_model}" if target_model_norm else "Unassigned")
+            )
+            await notification_service.on_queue_job_added(
+                job_name=job_name,
+                target=target,
+                db=db,
+                printer_id=item.printer_id,
+                printer_name=item.printer.name if item.printer else None,
+            )
+        except Exception:
+            pass  # Don't fail queue add if notification fails
 
-    return _enrich_response(item)
+    return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
 
 
 @router.patch("/bulk", response_model=PrintQueueBulkUpdateResponse)
@@ -563,6 +625,7 @@ async def bulk_update_queue_items(
 
 @router.get("/{item_id}", response_model=PrintQueueItemResponse)
 async def get_queue_item(
+    request: Request,
     item_id: int,
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
@@ -581,11 +644,12 @@ async def get_queue_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
-    return _enrich_response(item)
+    return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
 
 
 @router.patch("/{item_id}", response_model=PrintQueueItemResponse)
 async def update_queue_item(
+    request: Request,
     item_id: int,
     data: PrintQueueItemUpdate,
     db: AsyncSession = Depends(get_db),
@@ -642,6 +706,24 @@ async def update_queue_item(
         if not result.scalars().first():
             raise HTTPException(400, f"No active printers for model: {update_data['target_model']}")
 
+    if item.custom_request:
+        new_student_id = update_data.get("student_id", item.student_id)
+        new_requester_name = update_data.get("requester_name", item.requester_name)
+        new_contact_email = update_data.get("contact_email", item.contact_email)
+        new_request_model_url = update_data.get("request_model_url", item.request_model_url)
+        if not new_student_id or not str(new_student_id).strip():
+            raise HTTPException(400, "Student ID is required for custom requests")
+        if not new_requester_name or not str(new_requester_name).strip():
+            raise HTTPException(400, "Requester name is required for custom requests")
+        if not new_contact_email or not str(new_contact_email).strip():
+            raise HTTPException(400, "Contact email is required for custom requests")
+        if not _is_valid_contact_email(str(new_contact_email)):
+            raise HTTPException(400, "Please provide a valid contact email")
+        if not new_request_model_url or not str(new_request_model_url).strip():
+            raise HTTPException(400, "MakerWorld URL is required for custom requests")
+        if not _is_valid_makerworld_url(str(new_request_model_url)):
+            raise HTTPException(400, "Custom requests must use a MakerWorld China URL")
+
     # Serialize ams_mapping to JSON for TEXT column storage
     if "ams_mapping" in update_data:
         update_data["ams_mapping"] = json.dumps(update_data["ams_mapping"]) if update_data["ams_mapping"] else None
@@ -652,6 +734,19 @@ async def update_queue_item(
             json.dumps(update_data["filament_overrides"]) if update_data["filament_overrides"] else None
         )
 
+    if "student_id" in update_data and update_data["student_id"] is not None:
+        update_data["student_id"] = update_data["student_id"].strip()
+    if "requester_name" in update_data and update_data["requester_name"] is not None:
+        update_data["requester_name"] = update_data["requester_name"].strip()
+    if "contact_email" in update_data and update_data["contact_email"] is not None:
+        update_data["contact_email"] = update_data["contact_email"].strip()
+    if "request_model_url" in update_data and update_data["request_model_url"] is not None:
+        update_data["request_model_url"] = update_data["request_model_url"].strip()
+    if "request_notes" in update_data and update_data["request_notes"] is not None:
+        update_data["request_notes"] = update_data["request_notes"].strip()
+    if item.custom_request:
+        update_data["manual_start"] = True
+
     for field, value in update_data.items():
         setattr(item, field, value)
 
@@ -659,7 +754,73 @@ async def update_queue_item(
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info("Updated queue item %s", item_id)
-    return _enrich_response(item)
+    return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
+
+
+@router.patch("/{item_id}/status", response_model=PrintQueueItemResponse)
+async def update_custom_queue_item_status(
+    request: Request,
+    item_id: int,
+    data: PrintQueueItemStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_UPDATE_ALL,
+            Permission.QUEUE_UPDATE_OWN,
+        )
+    ),
+):
+    """Update status for manual queue registrations."""
+    user, can_modify_all = auth_result
+
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(404, "Queue item not found")
+
+    if not item.custom_request:
+        raise HTTPException(400, "Status updates on this endpoint are only supported for custom requests")
+
+    if not can_modify_all and item.created_by_id != user.id:
+        raise HTTPException(403, "You can only update your own queue items")
+
+    previous_status = item.status
+    now = datetime.now(timezone.utc)
+
+    if data.status == "pending":
+        item.status = "pending"
+        item.started_at = None
+        item.completed_at = None
+        item.error_message = None
+        if previous_status != "pending":
+            item.position = await _get_next_pending_position(db, item.printer_id)
+    elif data.status == "printing":
+        item.status = "printing"
+        item.started_at = item.started_at or now
+        item.completed_at = None
+        item.error_message = None
+    else:
+        item.status = "completed"
+        item.started_at = item.started_at or now
+        item.completed_at = now
+        item.error_message = None
+
+    await db.commit()
+    await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
+
+    logger.info("Updated custom queue item %s status to %s", item_id, data.status)
+    return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
+
+
+@router.post("/contact-access", response_model=QueueContactAccessResponse)
+async def validate_queue_contact_access(
+    data: QueueContactAccessRequest,
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
+):
+    """Validate the password used to reveal protected queue contact details."""
+    if not secrets.compare_digest(data.password, settings.queue_contact_view_password):
+        raise HTTPException(403, "Invalid contact details password")
+    return QueueContactAccessResponse(success=True)
 
 
 @router.delete("/{item_id}")
@@ -686,7 +847,7 @@ async def delete_queue_item(
         if item.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own queue items")
 
-    if item.status == "printing":
+    if item.status == "printing" and not item.custom_request:
         raise HTTPException(400, "Cannot delete item that is currently printing")
 
     await db.delete(item)

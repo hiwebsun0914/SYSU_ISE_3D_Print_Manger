@@ -1,6 +1,11 @@
 import type { ArchivePlatesResponse, LibraryFilePlatesResponse } from '../types/plates';
 
-const API_BASE = '/api/v1';
+function normalizeBaseUrl(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_BASE as string | undefined, '/api/v1');
 
 // Auth token storage
 let authToken: string | null = localStorage.getItem('auth_token');
@@ -1274,6 +1279,13 @@ export interface PrintQueueItem {
   // Either archive_id OR library_file_id must be set (archive created at print start)
   archive_id: number | null;
   library_file_id: number | null;
+  custom_request: boolean;
+  student_id: string | null;
+  requester_name: string | null;
+  contact_email: string | null;
+  contact_details_hidden: boolean;
+  request_model_url: string | null;
+  request_notes: string | null;
   position: number;
   scheduled_time: string | null;
   require_previous_success: boolean;
@@ -1313,6 +1325,12 @@ export interface PrintQueueItemCreate {
   filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
   archive_id?: number | null;
   library_file_id?: number | null;
+  custom_request?: boolean;
+  student_id?: string | null;
+  requester_name?: string | null;
+  contact_email?: string | null;
+  request_model_url?: string | null;
+  request_notes?: string | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   auto_off_after?: boolean;
@@ -1333,6 +1351,11 @@ export interface PrintQueueItemUpdate {
   target_model?: string | null;  // Target printer model (mutually exclusive with printer_id)
   target_location?: string | null;  // Target location filter (only used with target_model)
   filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
+  student_id?: string | null;
+  requester_name?: string | null;
+  contact_email?: string | null;
+  request_model_url?: string | null;
+  request_notes?: string | null;
   position?: number;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
@@ -1369,6 +1392,14 @@ export interface PrintQueueBulkUpdateResponse {
   updated_count: number;
   skipped_count: number;
   message: string;
+}
+
+export interface PrintQueueItemStatusUpdate {
+  status: 'pending' | 'printing' | 'completed';
+}
+
+export interface QueueContactAccessResponse {
+  success: boolean;
 }
 
 // MQTT Logging types
@@ -3339,14 +3370,24 @@ export const api = {
     request<HASensorEntity[]>('/smart-plugs/ha/sensors'),
 
   // Print Queue
-  getQueue: (printerId?: number, status?: string, targetModel?: string) => {
+  getQueue: (printerId?: number, status?: string, targetModel?: string, contactPassword?: string) => {
     const params = new URLSearchParams();
-    if (printerId) params.set('printer_id', String(printerId));
+    if (printerId !== undefined) params.set('printer_id', String(printerId));
     if (status) params.set('status', status);
     if (targetModel) params.set('target_model', targetModel);
-    return request<PrintQueueItem[]>(`/queue/?${params}`);
+    return request<PrintQueueItem[]>(`/queue/?${params}`, {
+      headers: contactPassword ? { 'X-Queue-Contact-Password': contactPassword } : undefined,
+    });
   },
-  getQueueItem: (id: number) => request<PrintQueueItem>(`/queue/${id}`),
+  getQueueItem: (id: number, contactPassword?: string) =>
+    request<PrintQueueItem>(`/queue/${id}`, {
+      headers: contactPassword ? { 'X-Queue-Contact-Password': contactPassword } : undefined,
+    }),
+  validateQueueContactAccess: (password: string) =>
+    request<QueueContactAccessResponse>('/queue/contact-access', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
   addToQueue: (data: PrintQueueItemCreate) =>
     request<PrintQueueItem>('/queue/', {
       method: 'POST',
@@ -3354,6 +3395,11 @@ export const api = {
     }),
   updateQueueItem: (id: number, data: PrintQueueItemUpdate) =>
     request<PrintQueueItem>(`/queue/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateCustomQueueItemStatus: (id: number, data: PrintQueueItemStatusUpdate) =>
+    request<PrintQueueItem>(`/queue/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),

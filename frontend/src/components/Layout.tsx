@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, ChevronLeft, ChevronRight, GripVertical, ArrowUpCircle, Wrench, FolderOpen, X, Menu, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Bell, Layers, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, ChevronLeft, ChevronRight, ArrowUpCircle, Wrench, X, Menu, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Layers, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { SwitchbarPopover } from './SwitchbarPopover';
@@ -25,36 +25,14 @@ interface NavItem {
 }
 
 export const defaultNavItems: NavItem[] = [
-  // Primary workflow items
   { id: 'printers', to: '/', icon: Printer, labelKey: 'nav.printers' },
-  { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
   { id: 'queue', to: '/queue', icon: Calendar, labelKey: 'nav.queue' },
   { id: 'stats', to: '/stats', icon: BarChart3, labelKey: 'nav.stats' },
-  { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
   { id: 'inventory', to: '/inventory', icon: Disc3, labelKey: 'nav.inventory' },
-  { id: 'files', to: '/files', icon: FolderOpen, labelKey: 'nav.files' },
+  { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
+  { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
   { id: 'kiri-moto', to: '/kiri-moto', icon: Layers, labelKey: 'nav.orcaSlicer' },
-  // User-account features: kept adjacent to Settings intentionally
-  { id: 'notifications', to: '/notifications', icon: Bell, labelKey: 'nav.notifications' },
 ];
-
-// Get unified sidebar order from localStorage
-function getSidebarOrder(): string[] {
-  const stored = localStorage.getItem('sidebarOrder');
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return defaultNavItems.map(i => i.id);
-    }
-  }
-  return defaultNavItems.map(i => i.id);
-}
-
-// Save unified sidebar order to localStorage
-function saveSidebarOrder(order: string[]) {
-  localStorage.setItem('sidebarOrder', JSON.stringify(order));
-}
 
 // Check if an ID is an external link
 function isExternalLinkId(id: string): boolean {
@@ -88,9 +66,6 @@ export function Layout() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSwitchbar, setShowSwitchbar] = useState(false);
-  const [sidebarOrder, setSidebarOrder] = useState<string[]>(getSidebarOrder);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const hasRedirected = useRef(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() =>
     sessionStorage.getItem('dismissedUpdateVersion')
@@ -112,47 +87,6 @@ export function Layout() {
     queryKey: ['settings'],
     queryFn: api.getSettings,
     staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Fetch default sidebar order via a public endpoint (no settings:read needed)
-  const { data: defaultSidebarData } = useQuery({
-    queryKey: ['default-sidebar-order'],
-    queryFn: api.getDefaultSidebarOrder,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Apply admin default sidebar order once per user (skipped if already applied).
-  // Uses a per-user localStorage flag to prevent re-application.
-  useEffect(() => {
-    const defaultOrder = defaultSidebarData?.default_sidebar_order;
-    if (!defaultOrder) return;
-    // Wait for auth state to settle before applying to avoid double-execution
-    if (authEnabled && !user) return;
-    const appliedKey = user ? `sidebarDefaultApplied_${user.id}` : 'sidebarDefaultApplied';
-    if (localStorage.getItem(appliedKey)) return;
-    try {
-      const parsed = JSON.parse(defaultOrder);
-      const orderArr = Array.isArray(parsed) ? parsed : parsed.order;
-      if (!Array.isArray(orderArr) || orderArr.length === 0) return;
-      // Filter to valid sidebar item IDs only
-      const validIds = new Set(defaultNavItems.map(i => i.id));
-      const filtered = orderArr.filter((id: string) => typeof id === 'string' && (validIds.has(id) || isExternalLinkId(id)));
-      if (filtered.length > 0) {
-        setSidebarOrder(filtered);
-        saveSidebarOrder(filtered);
-        localStorage.setItem(appliedKey, '1');
-      }
-    } catch (e) {
-      console.error('Failed to apply default sidebar order:', e);
-    }
-  }, [defaultSidebarData?.default_sidebar_order, setSidebarOrder, user, authEnabled]);
-
-  // Check advanced auth status for conditional nav items
-  const { data: advancedAuthStatus } = useQuery({
-    queryKey: ['advancedAuthStatus'],
-    queryFn: api.getAdvancedAuthStatus,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    enabled: authEnabled,
   });
 
   const { data: updateCheck } = useQuery({
@@ -258,111 +192,33 @@ export function Layout() {
   const navItemsMap = useMemo(() => new Map(defaultNavItems.map(item => [item.id, item])), []);
   const extLinksMap = useMemo(() => new Map((externalLinks || []).map(link => [`ext-${link.id}`, link])), [externalLinks]);
 
-  // Compute the ordered sidebar: include stored order + any new items
-  // Hide nav items the user doesn't have read permission for
   const orderedSidebarIds = (() => {
     const result: string[] = [];
-    const seen = new Set<string>();
 
-    // Map nav item IDs to the permission required to see them
     const navPermissions: Record<string, Permission> = {
       archives: 'archives:read',
       queue: 'queue:read',
       stats: 'stats:read',
       maintenance: 'maintenance:read',
       inventory: 'inventory:read',
-      files: 'library:read',
-      notifications: 'notifications:user_email',
     };
 
     const isHidden = (id: string) => {
       if (authEnabled && id in navPermissions && !hasPermission(navPermissions[id])) return true;
-      // notifications nav item also requires advanced auth to be enabled and user_notifications_enabled setting
-      if (id === 'notifications' && (!authEnabled || !advancedAuthStatus?.advanced_auth_enabled || (settings?.user_notifications_enabled === false))) return true;
       return false;
     };
 
-    // Add items in stored order
-    for (const id of sidebarOrder) {
-      if (isHidden(id)) continue;
-      if (navItemsMap.has(id) || extLinksMap.has(id)) {
-        result.push(id);
-        seen.add(id);
-      }
-    }
-
-    // Add any new internal nav items not in stored order
     for (const item of defaultNavItems) {
       if (isHidden(item.id)) continue;
-      if (!seen.has(item.id)) {
-        result.push(item.id);
-        seen.add(item.id);
-      }
+      result.push(item.id);
     }
 
-    // Add any new external links not in stored order
     for (const link of externalLinks || []) {
-      const extId = `ext-${link.id}`;
-      if (!seen.has(extId)) {
-        result.push(extId);
-        seen.add(extId);
-      }
+      result.push(`ext-${link.id}`);
     }
 
     return result;
   })();
-
-  // Unified drag handlers
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    setDraggedId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', id);
-  };
-
-  const handleDragOver = (e: React.DragEvent, id: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverId(id);
-  };
-
-  const handleDragLeave = () => {
-    setDragOverId(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    if (draggedId === null || draggedId === targetId) {
-      setDraggedId(null);
-      setDragOverId(null);
-      return;
-    }
-
-    const currentOrder = [...orderedSidebarIds];
-    const draggedIndex = currentOrder.indexOf(draggedId);
-    const targetIndex = currentOrder.indexOf(targetId);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedId(null);
-      setDragOverId(null);
-      return;
-    }
-
-    // Reorder
-    currentOrder.splice(draggedIndex, 1);
-    currentOrder.splice(targetIndex, 0, draggedId);
-
-    // Save to localStorage and update state
-    setSidebarOrder(currentOrder);
-    saveSidebarOrder(currentOrder);
-
-    setDraggedId(null);
-    setDragOverId(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedId(null);
-    setDragOverId(null);
-  };
 
   // Show update banner if update available and not dismissed for this version
   const showUpdateBanner = updateCheck?.update_available &&
@@ -528,19 +384,7 @@ export function Layout() {
                 return (
                   <li
                     key={id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, id)}
-                    onDragOver={(e) => handleDragOver(e, id)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, id)}
-                    onDragEnd={handleDragEnd}
-                    className={`relative ${
-                      draggedId === id ? 'opacity-50' : ''
-                    } ${
-                      dragOverId === id && draggedId !== id
-                        ? 'before:absolute before:left-0 before:right-0 before:top-0 before:h-0.5 before:bg-bambu-green'
-                        : ''
-                    }`}
+                    className="relative"
                   >
                     {link.open_in_new_tab ? (
                       <a
@@ -550,9 +394,6 @@ export function Layout() {
                         className={`flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white`}
                         title={!isSidebarCompact && !sidebarExpanded ? link.name : undefined}
                       >
-                        {sidebarExpanded && !isSidebarCompact && (
-                          <GripVertical className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing -ml-1" />
-                        )}
                         {link.custom_icon ? (
                           <img
                             src={`/api/v1/external-links/${link.id}/icon`}
@@ -576,9 +417,6 @@ export function Layout() {
                         }
                         title={!isSidebarCompact && !sidebarExpanded ? link.name : undefined}
                       >
-                        {sidebarExpanded && !isSidebarCompact && (
-                          <GripVertical className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing -ml-1" />
-                        )}
                         {link.custom_icon ? (
                           <img
                             src={`/api/v1/external-links/${link.id}/icon`}
@@ -608,19 +446,7 @@ export function Layout() {
                 return (
                   <li
                     key={id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, id)}
-                    onDragOver={(e) => handleDragOver(e, id)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, id)}
-                    onDragEnd={handleDragEnd}
-                    className={`relative ${
-                      draggedId === id ? 'opacity-50' : ''
-                    } ${
-                      dragOverId === id && draggedId !== id
-                        ? 'before:absolute before:left-0 before:right-0 before:top-0 before:h-0.5 before:bg-bambu-green'
-                        : ''
-                    }`}
+                    className="relative"
                   >
                     <NavLink
                       to={to}
@@ -633,9 +459,6 @@ export function Layout() {
                       }
                       title={!isSidebarCompact && !sidebarExpanded ? t(labelKey) : undefined}
                     >
-                      {sidebarExpanded && !isSidebarCompact && (
-                        <GripVertical className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing -ml-1" />
-                      )}
                       <div className="relative">
                         <Icon className="w-5 h-5 flex-shrink-0" />
                         {showClearPlateDot && (

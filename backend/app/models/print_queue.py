@@ -32,6 +32,13 @@ class PrintQueueItem(Base):
     library_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
     )
+    # Manual queue requests are tracked in the same table, but do not map to printable files.
+    custom_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    student_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    requester_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    request_model_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
 
     # Scheduling

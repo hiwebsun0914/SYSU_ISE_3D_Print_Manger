@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from 'react-i18next';
+import { getWebSocketBaseUrl } from '../utils/runtimeUrls';
 
 interface WebSocketMessage {
   type: string;
@@ -69,8 +70,7 @@ export function useWebSocket() {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/ws`;
+    const wsUrl = `${getWebSocketBaseUrl()}/api/v1/ws`;
 
     const ws = new WebSocket(wsUrl);
 

@@ -5,8 +5,10 @@ import path from 'path'
 // Backend port for dev server proxy (default: 8000)
 const backendPort = process.env.BACKEND_PORT || '8000'
 const backendUrl = `http://localhost:${backendPort}`
+const assetBase = process.env.VITE_ASSET_BASE || '/'
 
 export default defineConfig({
+  base: assetBase,
   plugins: [react()],
   build: {
     outDir: '../static',
