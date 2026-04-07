@@ -32,11 +32,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // Mode
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    const stored = localStorage.getItem('theme-mode') as ThemeMode | null;
-    const legacy = localStorage.getItem('theme') as ThemeMode | null;
-    return stored || legacy || 'dark';
-  });
+  const [mode, setModeState] = useState<ThemeMode>('light');
 
   // Dark mode settings
   const [darkStyle, setDarkStyleState] = useState<ThemeStyle>(() => {
@@ -120,8 +116,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('theme');
   }, [mode, darkStyle, darkBackground, darkAccent, lightStyle, lightBackground, lightAccent]);
 
-  const toggleMode = () => setModeState(prev => prev === 'dark' ? 'light' : 'dark');
-  const setMode = (m: ThemeMode) => setModeState(m);
+  const toggleMode = () => setModeState('light');
+  const setMode = (m: ThemeMode) => {
+    void m;
+    setModeState('light');
+  };
 
   // Dark setters
   const setDarkStyle = (v: ThemeStyle) => {

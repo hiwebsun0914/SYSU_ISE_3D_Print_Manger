@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, Sun, Moon, ChevronLeft, ChevronRight, Keyboard, Github, GripVertical, ArrowUpCircle, Wrench, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Bell, Layers, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, ChevronLeft, ChevronRight, GripVertical, ArrowUpCircle, Wrench, FolderOpen, X, Menu, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Bell, Layers, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { SwitchbarPopover } from './SwitchbarPopover';
 import { useQuery, useQueries } from '@tanstack/react-query';
@@ -75,7 +74,6 @@ export function setDefaultView(path: string) {
 export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { mode, toggleMode } = useTheme();
   const { t } = useTranslation();
   const isSidebarCompact = useIsSidebarCompact();
   const { user, authEnabled, logout, hasPermission } = useAuth();
@@ -507,11 +505,11 @@ export function Layout() {
         }`}
       >
         {/* Logo */}
-        <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${isSidebarCompact || sidebarExpanded ? 'p-4' : 'p-2'}`}>
+        <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${isSidebarCompact || sidebarExpanded ? 'px-4 py-5' : 'px-2 py-4'}`}>
           <img
             src={APP_LOGO_SRC}
             alt={APP_LOGO_ALT}
-            className={isSidebarCompact || sidebarExpanded ? 'h-16 w-auto max-w-full object-contain' : 'h-8 w-auto max-w-full object-contain'}
+            className={isSidebarCompact || sidebarExpanded ? 'mx-auto block h-24 w-auto max-w-full object-contain' : 'mx-auto block h-10 w-auto max-w-full object-contain'}
           />
         </div>
 
@@ -697,49 +695,6 @@ export function Layout() {
                     )}
                   </div>
                 )}
-                {hasPermission('system:read') ? (
-                  <NavLink
-                    to="/system"
-                    className={({ isActive }) =>
-                      `p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors ${
-                        isActive ? 'text-bambu-green' : 'text-bambu-gray-light hover:text-white'
-                      }`
-                    }
-                    title={t('nav.system')}
-                  >
-                    <Info className="w-5 h-5" />
-                  </NavLink>
-                ) : (
-                  <span
-                    className="p-2 rounded-lg text-bambu-gray/50 cursor-not-allowed"
-                    title="You do not have permission to view system information"
-                  >
-                    <Info className="w-5 h-5" />
-                  </span>
-                )}
-                <a
-                  href="https://github.com/maziggy/bambuddy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                  title={t('nav.viewOnGithub')}
-                >
-                  <Github className="w-5 h-5" />
-                </a>
-                <button
-                  onClick={() => setShowShortcuts(true)}
-                  className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                  title={t('nav.keyboardShortcuts')}
-                >
-                  <Keyboard className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={toggleMode}
-                  className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                  title={mode === 'dark' ? t('nav.switchToLight') : t('nav.switchToDark')}
-                >
-                  {mode === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                </button>
                 {authEnabled && user && (
                   <>
                     <button
@@ -801,49 +756,6 @@ export function Layout() {
                   )}
                 </div>
               )}
-              {hasPermission('system:read') ? (
-                <NavLink
-                  to="/system"
-                  className={({ isActive }) =>
-                    `p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors ${
-                      isActive ? 'text-bambu-green' : 'text-bambu-gray-light hover:text-white'
-                    }`
-                  }
-                  title={t('nav.system')}
-                >
-                  <Info className="w-5 h-5" />
-                </NavLink>
-              ) : (
-                <span
-                  className="p-2 rounded-lg text-bambu-gray/50 cursor-not-allowed"
-                  title="You do not have permission to view system information"
-                >
-                  <Info className="w-5 h-5" />
-                </span>
-              )}
-              <a
-                href="https://github.com/maziggy/bambuddy"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                title={t('nav.viewOnGithub')}
-              >
-                <Github className="w-5 h-5" />
-              </a>
-              <button
-                onClick={() => setShowShortcuts(true)}
-                className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                title={t('nav.keyboardShortcuts')}
-              >
-                <Keyboard className="w-5 h-5" />
-              </button>
-              <button
-                onClick={toggleMode}
-                className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                title={mode === 'dark' ? t('nav.switchToLight') : t('nav.switchToDark')}
-              >
-                {mode === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
               {authEnabled && user && (
                 <>
                   <button
