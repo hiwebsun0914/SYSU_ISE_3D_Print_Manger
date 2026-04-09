@@ -9,6 +9,7 @@ export default {
     maintenance: 'Maintenance',
     projects: 'Projects',
     inventory: 'Filament',
+    modelLibrary: 'Model Library',
     files: 'File Manager',
     orcaSlicer: 'Slice',
     notifications: 'Notifications',
@@ -1051,6 +1052,40 @@ export default {
       completeWithFailures: 'Background dispatch complete: {{completed}} succeeded, {{failed}} failed',
       completeSuccess: 'Background dispatch complete: {{completed}} succeeded',
       printStartedRemaining: '{{completed}} print(s) started, {{remaining}} more sending...',
+    },
+  },
+
+  modelLibrary: {
+    title: 'Model Library',
+    subtitle: 'Open MakerWorld from here, copy the model page link, and submit it straight into the queue.',
+    embedNoticeTitle: 'MakerWorld opens in a new tab',
+    embedNoticeDescription: 'MakerWorld currently blocks third-party embedding, so Bambuddy uses an open-and-return workflow here.',
+    quickLinksTitle: 'Browse MakerWorld',
+    quickLinksDescription: 'Open MakerWorld, find the model you want, copy its model page link, then paste it into the form.',
+    searchLabel: 'Search MakerWorld',
+    searchPlaceholder: 'Search by model, designer, or keyword',
+    openSearch: 'Search MakerWorld',
+    openExplore: 'Open model hub',
+    howToTitle: 'How it works',
+    howToStep1: '1. Open MakerWorld to browse popular or newly shared models.',
+    howToStep2: '2. Copy the final model detail link once you find the right model.',
+    howToStep3: '3. Paste the link here and submit the request to the queue.',
+    requestTitle: 'Submit MakerWorld request',
+    requestDescription: 'Fill in the request details below. It will be added to the queue as a manual request.',
+    readClipboard: 'Paste clipboard',
+    openModel: 'Open link',
+    viewQueue: 'View queue',
+    submit: 'Submit to queue',
+    previewLabel: 'Detected model:',
+    notesPlaceholder: 'Optional notes for print size, color, settings, or pickup.',
+    permissionHint: 'You do not have permission to create queue requests.',
+    toast: {
+      clipboardLoaded: 'Clipboard link pasted',
+      clipboardEmpty: 'Clipboard is empty',
+      clipboardUnavailable: 'Clipboard access requires a secure browser context',
+      clipboardFailed: 'Failed to read clipboard',
+      requestSubmitted: 'Request submitted to queue',
+      requestFailed: 'Failed to submit request',
     },
   },
 
@@ -4616,18 +4651,6 @@ export default {
   // Switchbar Popover
   switchbarPopover: {
     noSwitchesInSwitchbar: 'No switches in switchbar',
-  },
-
-  // Project Page Modal
-  projectPageModal: {
-    placeholders: {
-      title: 'Title',
-      designer: 'Designer',
-      license: 'License',
-      description: 'Enter description...',
-      profileTitle: 'Profile Title',
-      profileDescription: 'Profile description...',
-    },
   },
 
   // Spoolman Settings

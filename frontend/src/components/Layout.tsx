@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, Calendar, BarChart3, ChevronLeft, ChevronRight, ArrowUpCircle, Wrench, X, Menu, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Layers, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, Calendar, BarChart3, ChevronLeft, ChevronRight, ArrowUpCircle, Wrench, X, Menu, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Layers, BookOpen, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { SwitchbarPopover } from './SwitchbarPopover';
@@ -31,6 +31,7 @@ export const defaultNavItems: NavItem[] = [
   { id: 'inventory', to: '/inventory', icon: Disc3, labelKey: 'nav.inventory' },
   { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
   { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
+  { id: 'model-library', to: '/model-library', icon: BookOpen, labelKey: 'nav.modelLibrary' },
   { id: 'kiri-moto', to: '/kiri-moto', icon: Layers, labelKey: 'nav.orcaSlicer' },
 ];
 

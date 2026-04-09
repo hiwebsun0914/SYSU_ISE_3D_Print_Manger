@@ -9,6 +9,7 @@ export default {
     maintenance: '维护',
     projects: '项目',
     inventory: '耗材',
+    modelLibrary: '模型库',
     files: '文件管理器',
     orcaSlicer: '切片',
     notifications: '通知',
@@ -1051,6 +1052,40 @@ export default {
       completeWithFailures: '后台分发完成：{{completed}} 成功，{{failed}} 失败',
       completeSuccess: '后台分发完成：{{completed}} 成功',
       printStartedRemaining: '{{completed}} 个打印已开始，{{remaining}} 个正在发送...',
+    },
+  },
+
+  modelLibrary: {
+    title: '模型库',
+    subtitle: '从这里打开 MakerWorld 浏览模型，复制模型详情页链接后，直接回填并提交到队列。',
+    embedNoticeTitle: 'MakerWorld 需要在新标签页打开',
+    embedNoticeDescription: 'MakerWorld 当前会阻止第三方嵌入，所以这里采用“打开浏览 + 回来提交”的方式，流程仍然保留在 Bambuddy 中。',
+    quickLinksTitle: '浏览 MakerWorld',
+    quickLinksDescription: '打开 MakerWorld 找到模型后，复制模型详情页链接，再粘贴到右侧表单。',
+    searchLabel: '搜索 MakerWorld',
+    searchPlaceholder: '输入模型名、设计师或关键词',
+    openSearch: '搜索 MakerWorld',
+    openExplore: '打开模型广场',
+    howToTitle: '使用步骤',
+    howToStep1: '1. 打开 MakerWorld，浏览热门或最新模型。',
+    howToStep2: '2. 找到合适模型后，复制最终模型详情页链接。',
+    howToStep3: '3. 回到这里粘贴链接并提交登记，系统会加入队列。',
+    requestTitle: '提交 MakerWorld 登记',
+    requestDescription: '填写下面的信息后，会以人工登记的方式加入队列。',
+    readClipboard: '读取剪贴板',
+    openModel: '打开链接',
+    viewQueue: '查看队列',
+    submit: '提交到队列',
+    previewLabel: '识别到的模型：',
+    notesPlaceholder: '可选填写尺寸、颜色、打印要求或交付备注。',
+    permissionHint: '你没有创建队列登记的权限。',
+    toast: {
+      clipboardLoaded: '已从剪贴板读取链接',
+      clipboardEmpty: '剪贴板为空',
+      clipboardUnavailable: '当前浏览器环境不支持读取剪贴板',
+      clipboardFailed: '读取剪贴板失败',
+      requestSubmitted: '登记已提交到队列',
+      requestFailed: '提交登记失败',
     },
   },
 
@@ -4601,18 +4636,6 @@ export default {
   // Switchbar Popover
   switchbarPopover: {
     noSwitchesInSwitchbar: '切换栏中没有开关',
-  },
-
-  // Project Page Modal
-  projectPageModal: {
-    placeholders: {
-      title: '标题',
-      designer: '设计师',
-      license: '许可证',
-      description: '输入描述...',
-      profileTitle: '配置标题',
-      profileDescription: '配置描述...',
-    },
   },
 
   // Spoolman Settings

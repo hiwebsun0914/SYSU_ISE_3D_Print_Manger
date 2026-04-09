@@ -46,6 +46,7 @@ import {
   Check,
   CheckSquare,
   Square,
+  BookOpen,
   User,
   Pause,
   Weight,
@@ -62,8 +63,8 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { PrintModal } from '../components/PrintModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { getMakerWorldModelDisplayName, isMakerWorldCnModelUrl } from '../utils/makerWorld';
 
-const MAKERWORLD_URL_PREFIX = 'https://makerworld.com.cn/zh/';
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function formatWeight(g: number, useKg = false): string {
@@ -77,19 +78,7 @@ function isValidContactEmail(email: string): boolean {
 
 function getCustomRequestTitle(item: PrintQueueItem, fallbackTitle: string): string {
   if (!item.request_model_url) return fallbackTitle;
-
-  try {
-    const pathname = new URL(item.request_model_url).pathname;
-    const segments = pathname.split('/').filter(Boolean);
-    const modelsIndex = segments.findIndex(segment => segment === 'models');
-    const rawSlug = modelsIndex >= 0 ? segments[modelsIndex + 1] : segments[segments.length - 1];
-    if (!rawSlug) return fallbackTitle;
-
-    const decoded = decodeURIComponent(rawSlug).replace(/^\d+-/, '').replace(/[-_]+/g, ' ').trim();
-    return decoded || rawSlug;
-  } catch {
-    return fallbackTitle;
-  }
+  return getMakerWorldModelDisplayName(item.request_model_url, fallbackTitle);
 }
 
 function getQueueItemDisplayName(item: PrintQueueItem, fallbackCustomTitle: string): string {
@@ -315,7 +304,7 @@ function QueueRequestModal({
       return;
     }
 
-    if (!trimmedRequestModelUrl.startsWith(MAKERWORLD_URL_PREFIX)) {
+    if (!isMakerWorldCnModelUrl(trimmedRequestModelUrl)) {
       setError(t('queue.request.urlError'));
       return;
     }
@@ -344,6 +333,20 @@ function QueueRequestModal({
 
         <div className="p-4 space-y-4">
           <p className="text-sm text-bambu-gray">{t('queue.request.description')}</p>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm text-white font-medium">{t('nav.modelLibrary')}</p>
+              <p className="text-xs text-bambu-gray">{t('modelLibrary.quickLinksDescription')}</p>
+            </div>
+            <Link
+              to="/model-library"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-bambu-green px-3 py-2 text-sm font-medium text-white hover:bg-bambu-green-light transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              {t('nav.modelLibrary')}
+            </Link>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -126,7 +126,7 @@ export function KiriMotoPage() {
     navigate(`/files${params.toString() ? `?${params.toString()}` : ''}`);
   }
 
-  function pushPendingModelIntoKiri() {
+  const pushPendingModelIntoKiri = useCallback(() => {
     const pendingModel = pendingModelRef.current;
     const frameApi = window.kiri?.frame;
 
@@ -146,7 +146,7 @@ export function KiriMotoPage() {
       setLoadError(message);
       setStatusMessage(t('kiriMoto.status.modelLoadFailed'));
     }
-  }
+  }, [kiriReady, t]);
 
   useEffect(() => {
     if (!activeEmbed || !activeLaunchUrl) {
@@ -232,11 +232,11 @@ export function KiriMotoPage() {
     return () => {
       cancelled = true;
     };
-  }, [autoLoadSupported, kiriReady, sourceDownloadUrl, sourceFilename, t]);
+  }, [autoLoadSupported, kiriReady, pushPendingModelIntoKiri, sourceDownloadUrl, sourceFilename, t]);
 
   useEffect(() => {
     pushPendingModelIntoKiri();
-  }, [kiriReady]);
+  }, [pushPendingModelIntoKiri]);
 
   useEffect(() => {
     function updateWorkspaceHeight() {

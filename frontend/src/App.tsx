@@ -20,6 +20,7 @@ const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage').then((m
 const FileManagerPage = lazy(() => import('./pages/FileManagerPage').then((m) => ({ default: m.FileManagerPage })));
 const OnlineSlicerPage = lazy(() => import('./pages/OnlineSlicerPage').then((m) => ({ default: m.OnlineSlicerPage })));
 const KiriMotoPage = lazy(() => import('./pages/KiriMotoPage').then((m) => ({ default: m.KiriMotoPage })));
+const ModelLibraryPage = lazy(() => import('./pages/ModelLibraryPage').then((m) => ({ default: m.ModelLibraryPage })));
 const CameraPage = lazy(() => import('./pages/CameraPage').then((m) => ({ default: m.CameraPage })));
 const StreamOverlayPage = lazy(() => import('./pages/StreamOverlayPage').then((m) => ({ default: m.StreamOverlayPage })));
 const ExternalLinkPage = lazy(() => import('./pages/ExternalLinkPage').then((m) => ({ default: m.ExternalLinkPage })));
@@ -148,6 +149,7 @@ function App() {
                   <Route path="projects/:id" element={<ProjectDetailPage />} />
                   <Route path="inventory" element={<InventoryPage />} />
                   <Route path="files" element={<FileManagerPage />} />
+                  <Route path="model-library" element={<ModelLibraryPage />} />
                   <Route path="slicer" element={<OnlineSlicerPage provider="bambu_studio" />} />
                   <Route path="kiri-moto" element={<KiriMotoPage />} />
                   <Route path="orca-slicer" element={<Navigate to="/kiri-moto" replace />} />

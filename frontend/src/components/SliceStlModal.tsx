@@ -25,9 +25,9 @@ export function SliceStlModal({ file, onClose, onSuccess }: SliceStlModalProps) 
     queryFn: () => api.getLibrarySlicePresets(),
   });
 
-  const printerPresets = data?.printer ?? [];
-  const processPresets = data?.process ?? [];
-  const filamentPresets = data?.filament ?? [];
+  const printerPresets = useMemo(() => data?.printer ?? [], [data?.printer]);
+  const processPresets = useMemo(() => data?.process ?? [], [data?.process]);
+  const filamentPresets = useMemo(() => data?.filament ?? [], [data?.filament]);
 
   useEffect(() => {
     if (printerPresetId === '' && printerPresets.length > 0) {

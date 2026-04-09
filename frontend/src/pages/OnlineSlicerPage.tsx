@@ -71,6 +71,8 @@ export function OnlineSlicerPage({ provider = 'bambu_studio' }: OnlineSlicerPage
     }),
     onSuccess: (result) => setSession(result),
   });
+  const prepareSession = prepareSessionMutation.mutate;
+  const prepareSessionStatus = prepareSessionMutation.status;
 
   const importOutputsMutation = useMutation({
     mutationFn: () => {
@@ -93,11 +95,11 @@ export function OnlineSlicerPage({ provider = 'bambu_studio' }: OnlineSlicerPage
   });
 
   useEffect(() => {
-    if (!hasValidFileId || session || prepareSessionMutation.status !== 'idle') {
+    if (!hasValidFileId || session || prepareSessionStatus !== 'idle') {
       return;
     }
-    prepareSessionMutation.mutate();
-  }, [hasValidFileId, prepareSessionMutation.status, prepareSessionMutation.mutate, session, provider]);
+    prepareSession();
+  }, [hasValidFileId, prepareSession, prepareSessionStatus, session]);
 
   const goBack = () => {
     const params = new URLSearchParams();
