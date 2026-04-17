@@ -242,6 +242,36 @@ class TestCameraAPI:
         assert "external camera" in response.json()["detail"].lower()
 
     # ========================================================================
+    # Public Live Frame Endpoint
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_public_live_frame_printer_not_found(self, async_client: AsyncClient):
+        """Verify 404 when requesting a public live frame for a missing printer."""
+        response = await async_client.get("/api/v1/printers/99999/camera/public-live-frame")
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_public_live_frame_success(self, async_client: AsyncClient, printer_factory):
+        """Verify the public live frame endpoint returns a JPEG image."""
+        printer = await printer_factory()
+        fake_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+
+        with patch(
+            "backend.app.api.routes.camera.public_live_camera_service.get_frame",
+            new_callable=AsyncMock,
+            return_value=fake_jpeg,
+        ):
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/public-live-frame")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+        assert response.content == fake_jpeg
+
+    # ========================================================================
     # Camera Stream Endpoint
     # ========================================================================
 

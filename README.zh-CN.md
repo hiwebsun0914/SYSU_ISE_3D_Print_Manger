@@ -94,6 +94,19 @@ cd ..
 
 - 前端构建产物会输出到仓库根目录的 `static/`
 - 当前仓库已对 `npm run build` 做了兼容处理，在低兼容平台上也会显式带上 Node 内存参数
+- 如果要把前端静态资源发布到 COS/CDN，可在构建前设置：
+
+```bash
+export VITE_ASSET_BASE="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/"
+export VITE_PUBLIC_FILE_BASE_URL="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/"
+cd frontend
+npm run build
+```
+
+- `VITE_ASSET_BASE` 用于让首页加载 `assets/`、`img/`、`icons/` 等静态资源时优先走 COS
+- `VITE_PUBLIC_FILE_BASE_URL` 用于让归档/模型库的缩略图、timelapse 等公开文件可直接从 COS 读取
+- 如果要让这些文件可直接访问，需要把 Bambuddy 数据目录中的相对路径文件同步到 COS，并保持路径结构不变
+- 打印机实时视频流属于动态流媒体，不适合直接放进 COS；当前公共相机帧会改为按请求由后端按需抓图，而不是持续上传到 COS
 
 #### 3. 启动服务
 

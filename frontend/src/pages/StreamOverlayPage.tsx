@@ -3,13 +3,14 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Layers, Clock, Timer, Printer } from 'lucide-react';
-import { api } from '../api/client';
+import { api, getPublicPrinterLiveFrameUrl } from '../api/client';
 import type { PrinterStatus } from '../api/client';
 import { formatDuration, formatETA, type TimeFormat } from '../utils/date';
 import { getApiBaseUrl, getWebSocketBaseUrl } from '../utils/runtimeUrls';
 import { APP_LOGO_ALT, APP_LOGO_SRC, APP_TITLE } from '../constants/branding';
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
+const PUBLIC_LIVE_FRAME_REFRESH_INTERVAL = 500;
 
 type OverlaySize = 'small' | 'medium' | 'large';
 
@@ -105,6 +106,8 @@ export function StreamOverlayPage() {
   const queryClient = useQueryClient();
   const id = parseInt(printerId || '0', 10);
   const [imageKey, setImageKey] = useState(Date.now());
+  const publicLiveFrameUrl = getPublicPrinterLiveFrameUrl(id, imageKey);
+  const usesPublicLiveFrames = publicLiveFrameUrl !== null;
 
   const config = useMemo(() => parseConfig(searchParams), [searchParams]);
   const sizes = getSizeClasses(config.size);
@@ -174,6 +177,18 @@ export function StreamOverlayPage() {
     }, 3000);
   };
 
+  useEffect(() => {
+    if (!usesPublicLiveFrames) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setImageKey(Date.now());
+    }, PUBLIC_LIVE_FRAME_REFRESH_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [usesPublicLiveFrames]);
+
   if (!id) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -192,14 +207,14 @@ export function StreamOverlayPage() {
 
   const isPrinting = status.state === 'RUNNING' || status.state === 'PAUSE';
   const progress = status.progress || 0;
-  const streamUrl = `${getApiBaseUrl()}/printers/${id}/camera/stream?fps=${config.fps}&t=${imageKey}`;
+  const streamUrl = publicLiveFrameUrl ?? `${getApiBaseUrl()}/printers/${id}/camera/stream?fps=${config.fps}&t=${imageKey}`;
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">
       {/* Camera feed - fullscreen background (optional) */}
       {config.showCamera && (
         <img
-          key={imageKey}
+          key={usesPublicLiveFrames ? `stream-overlay-public-live-${id}` : String(imageKey)}
           src={streamUrl}
           alt={t('streamOverlay.cameraStream')}
           className="absolute inset-0 w-full h-full object-contain"

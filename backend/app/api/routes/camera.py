@@ -12,12 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.camera import (
     capture_camera_frame,
+    capture_camera_frame_bytes,
     create_tls_proxy,
     generate_chamber_image_stream,
     get_camera_port,
@@ -26,6 +28,8 @@ from backend.app.services.camera import (
     read_next_chamber_frame,
     test_camera_connection,
 )
+from backend.app.services.external_camera import capture_frame as capture_external_camera_frame
+from backend.app.services.public_live_camera import public_live_camera_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["camera"])
@@ -786,6 +790,49 @@ async def camera_snapshot(
         # Clean up temp file
         if temp_path.exists():
             temp_path.unlink()
+
+
+@router.get("/{printer_id}/camera/public-live-frame")
+async def public_live_frame(
+    printer_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return an on-demand cached JPEG for public/live snapshot mode."""
+    printer = await get_printer_or_404(printer_id, db)
+    timeout = settings.public_live_camera_capture_timeout_seconds
+
+    async def capture_public_frame() -> bytes | None:
+        if printer.external_camera_enabled and printer.external_camera_url and printer.external_camera_type:
+            return await capture_external_camera_frame(
+                printer.external_camera_url,
+                printer.external_camera_type,
+                timeout=timeout,
+            )
+
+        return await capture_camera_frame_bytes(
+            ip_address=printer.ip_address,
+            access_code=printer.access_code,
+            model=printer.model,
+            timeout=timeout,
+        )
+
+    frame_data = await public_live_camera_service.get_frame(printer_id, capture_public_frame)
+    if not frame_data:
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to capture public live camera frame. Ensure printer is on and camera is enabled.",
+        )
+
+    return Response(
+        content=frame_data,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Content-Disposition": f'inline; filename="public_live_{printer_id}.jpg"',
+        },
+    )
 
 
 @router.get("/{printer_id}/camera/test")

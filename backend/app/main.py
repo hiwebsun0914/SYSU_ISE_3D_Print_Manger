@@ -73,6 +73,7 @@ from backend.app.services.printer_manager import (
     printer_manager,
     printer_state_to_dict,
 )
+from backend.app.services.public_live_camera import public_live_camera_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.services.spool_assignment_notifications import (
     notify_missing_spool_assignments_on_print_start,
@@ -3838,6 +3839,9 @@ async def lifespan(app: FastAPI):
     # Start camera stream orphan cleanup
     start_camera_cleanup()
 
+    # Start public live camera cache cleanup
+    public_live_camera_service.start()
+
     # Start expected-print TTL eviction (prevents memory leak when prints are
     # registered but on_print_start never fires)
     start_expected_prints_cleanup()
@@ -3864,6 +3868,7 @@ async def lifespan(app: FastAPI):
     stop_runtime_tracking()
     stop_spoolbuddy_watchdog()
     stop_camera_cleanup()
+    public_live_camera_service.stop()
     stop_expected_prints_cleanup()
     printer_manager.disconnect_all()
     await close_spoolman_client()

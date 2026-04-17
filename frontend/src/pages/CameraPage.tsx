@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, AlertTriangle, Camera, Maximize, Minimize, WifiOff, ZoomIn, ZoomOut } from 'lucide-react';
-import { api, getAuthToken } from '../api/client';
+import { api, getOnDemandPrinterLiveFrameUrl } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
@@ -14,6 +14,7 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
 const MAX_RECONNECT_DELAY = 30000; // 30 seconds
 const STALL_CHECK_INTERVAL = 5000; // Check every 5 seconds
+const PUBLIC_LIVE_FRAME_REFRESH_INTERVAL = 500;
 
 export function CameraPage() {
   const { t } = useTranslation();
@@ -44,6 +45,8 @@ export function CameraPage() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const liveFrameUrl = getOnDemandPrinterLiveFrameUrl(id, imageKey);
+  const usesPublicLiveFrames = streamMode === 'stream';
 
   // Fetch printer info
   const { data: printer } = useQuery({
@@ -98,22 +101,11 @@ export function CameraPage() {
   const stopSentRef = useRef(false);
 
   useEffect(() => {
-    const stopUrl = `/api/v1/printers/${id}/camera/stop`;
     stopSentRef.current = false;
-
-    const sendStopOnce = () => {
-      if (id > 0 && !stopSentRef.current) {
-        stopSentRef.current = true;
-        const headers: Record<string, string> = {};
-        const token = getAuthToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        fetch(stopUrl, { method: 'POST', keepalive: true, headers }).catch(() => {});
-      }
-    };
 
     // Handle page unload/close with keepalive fetch (more reliable than sendBeacon, supports auth)
     const handleBeforeUnload = () => {
-      sendStopOnce();
+      stopSentRef.current = true;
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -128,8 +120,7 @@ export function CameraPage() {
       if (imgElement) {
         imgElement.src = '';
       }
-      // Send stop signal only once
-      sendStopOnce();
+      stopSentRef.current = true;
     };
   }, [id]);
 
@@ -256,7 +247,7 @@ export function CameraPage() {
   useEffect(() => {
     // Only skip stall check during initial load, reconnecting, or transitioning
     // Continue checking even during streamError to detect recovery
-    if (streamMode !== 'stream' || streamLoading || isReconnecting || transitioning) {
+    if (streamMode !== 'stream' || usesPublicLiveFrames || streamLoading || isReconnecting || transitioning) {
       if (stallCheckIntervalRef.current) {
         clearInterval(stallCheckIntervalRef.current);
         stallCheckIntervalRef.current = null;
@@ -291,7 +282,19 @@ export function CameraPage() {
         stallCheckIntervalRef.current = null;
       }
     };
-  }, [streamMode, streamLoading, streamError, isReconnecting, transitioning, id, attemptReconnect]);
+  }, [streamMode, usesPublicLiveFrames, streamLoading, streamError, isReconnecting, transitioning, id, attemptReconnect]);
+
+  useEffect(() => {
+    if (!usesPublicLiveFrames || transitioning || isReconnecting) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setImageKey(Date.now());
+    }, PUBLIC_LIVE_FRAME_REFRESH_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [usesPublicLiveFrames, transitioning, isReconnecting]);
 
   const handleStreamError = () => {
     setStreamLoading(false);
@@ -344,15 +347,6 @@ export function CameraPage() {
     }
   };
 
-  const stopStream = () => {
-    if (id > 0) {
-      const headers: Record<string, string> = {};
-      const token = getAuthToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch(`/api/v1/printers/${id}/camera/stop`, { method: 'POST', headers }).catch(() => {});
-    }
-  };
-
   const switchToMode = (newMode: 'stream' | 'snapshot') => {
     if (streamMode === newMode || transitioning) return;
     setTransitioning(true);
@@ -373,11 +367,6 @@ export function CameraPage() {
 
     if (imgRef.current) {
       imgRef.current.src = '';
-    }
-
-    // Stop any active streams when switching modes
-    if (streamMode === 'stream') {
-      stopStream();
     }
 
     setTimeout(() => {
@@ -404,11 +393,6 @@ export function CameraPage() {
 
     if (imgRef.current) {
       imgRef.current.src = '';
-    }
-
-    // Stop any active streams before refresh
-    if (streamMode === 'stream') {
-      stopStream();
     }
 
     setTimeout(() => {
@@ -576,7 +560,7 @@ export function CameraPage() {
   const currentUrl = transitioning
     ? ''
     : streamMode === 'stream'
-      ? `/api/v1/printers/${id}/camera/stream?fps=15&t=${imageKey}`
+      ? liveFrameUrl
       : `/api/v1/printers/${id}/camera/snapshot?t=${imageKey}`;
 
   const isDisabled = streamLoading || transitioning || isReconnecting;
@@ -726,7 +710,7 @@ export function CameraPage() {
           )}
           <img
             ref={imgRef}
-            key={imageKey}
+            key={usesPublicLiveFrames ? `camera-page-public-live-${id}` : String(imageKey)}
             src={currentUrl}
             alt={t('camera.cameraStream')}
             className="max-w-full max-h-full object-contain select-none"
