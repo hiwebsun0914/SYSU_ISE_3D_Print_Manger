@@ -16,6 +16,145 @@ import defusedxml.ElementTree as ET
 # Default filament properties
 DEFAULT_FILAMENT_DIAMETER = 1.75  # mm
 DEFAULT_FILAMENT_DENSITY = 1.24  # g/cm³ (PLA)
+THREEMF_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+THREEMF_IMAGE_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+
+def get_3mf_image_content_type(image_path: str) -> str:
+    """Infer the response content type for an image stored inside a 3MF archive."""
+    return THREEMF_IMAGE_CONTENT_TYPES.get(Path(image_path).suffix.lower(), "application/octet-stream")
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _build_thumbnail_candidates(
+    plate_number: int | None,
+    *,
+    prefer_top: bool = False,
+    allow_small: bool = True,
+) -> list[str]:
+    bases: list[str] = []
+    if plate_number:
+        bases.extend(
+            [
+                f"Metadata/plate_{plate_number}",
+                f"Metadata/top_{plate_number}",
+            ]
+        )
+        if allow_small:
+            bases.append(f"Metadata/plate_{plate_number}_small")
+
+    bases.extend(
+        [
+            "Metadata/plate_1",
+            "Metadata/top_1",
+            "Metadata/thumbnail",
+            "Metadata/model_thumbnail",
+        ]
+    )
+    if allow_small:
+        bases.append("Metadata/plate_1_small")
+    bases.extend(
+        [
+            "Thumbnails/thumbnail",
+            "thumbnail",
+        ]
+    )
+
+    ordered_bases = bases
+    if prefer_top:
+        ordered_bases = sorted(
+            bases,
+            key=lambda base: 0 if "/top_" in base else 1,
+        )
+
+    candidates: list[str] = []
+    for base in ordered_bases:
+        for ext in THREEMF_IMAGE_EXTENSIONS:
+            candidates.append(f"{base}{ext}")
+    return _dedupe_preserve_order(candidates)
+
+
+def find_thumbnail_entry_in_3mf(
+    zf: zipfile.ZipFile,
+    *,
+    plate_number: int | None = None,
+    prefer_top: bool = False,
+    allow_small: bool = True,
+) -> str | None:
+    """Locate the best available thumbnail-like image inside a 3MF archive."""
+    names = zf.namelist()
+    for candidate in _build_thumbnail_candidates(plate_number, prefer_top=prefer_top, allow_small=allow_small):
+        if candidate in names:
+            return candidate
+
+    ranked_matches: list[tuple[int, str]] = []
+    plate_token = f"plate_{plate_number}" if plate_number else None
+
+    for name in names:
+        lower = name.lower()
+        if not lower.endswith(THREEMF_IMAGE_EXTENSIONS):
+            continue
+
+        score = 90
+        if plate_token and f"metadata/{plate_token}." in lower:
+            score = 0
+        elif plate_token and f"metadata/{plate_token}_" in lower:
+            score = 1
+        elif plate_token and f"metadata/top_{plate_number}." in lower:
+            score = 2
+        elif lower.startswith("metadata/plate_") and "_small" not in lower and "no_light" not in lower:
+            score = 10
+        elif lower.startswith("auxiliaries/.thumbnails/"):
+            score = 20
+        elif lower.startswith("metadata/thumbnail") or lower.startswith("metadata/model_thumbnail"):
+            score = 30
+        elif lower.endswith("/thumbnail.png") or lower.endswith("/thumbnail.jpg") or lower.endswith("/thumbnail.webp"):
+            score = 40
+        elif lower.startswith("metadata/"):
+            score = 50
+
+        ranked_matches.append((score, name))
+
+    if not ranked_matches:
+        return None
+
+    ranked_matches.sort(key=lambda item: (item[0], item[1]))
+    return ranked_matches[0][1]
+
+
+def read_thumbnail_from_3mf(
+    zf: zipfile.ZipFile,
+    *,
+    plate_number: int | None = None,
+    prefer_top: bool = False,
+    allow_small: bool = True,
+) -> tuple[str, bytes, str] | None:
+    """Read the best available thumbnail from a 3MF archive."""
+    entry = find_thumbnail_entry_in_3mf(
+        zf,
+        plate_number=plate_number,
+        prefer_top=prefer_top,
+        allow_small=allow_small,
+    )
+    if not entry:
+        return None
+    return (entry, zf.read(entry), get_3mf_image_content_type(entry))
 
 
 def parse_gcode_layer_filament_usage(gcode_content: str) -> dict[int, dict[int, float]]:

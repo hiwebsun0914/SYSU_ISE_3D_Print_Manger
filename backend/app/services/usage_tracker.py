@@ -502,10 +502,13 @@ async def on_print_complete(
         archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
         archive = archive_result.scalar_one_or_none()
         if archive:
+            total_filament_used = round(sum(r.get("weight_used", 0) or 0 for r in results), 1)
+            if total_filament_used > 0:
+                archive.filament_used_grams = total_filament_used
             total_cost = sum(r.get("cost", 0) or 0 for r in results)
             if total_cost > 0:
                 archive.cost = round(total_cost, 2)
-                await db.commit()
+            await db.commit()
 
     return results
 

@@ -681,6 +681,16 @@ function isSlicedFilename(filename: string): boolean {
   return lower.endsWith('.gcode') || lower.includes('.gcode.');
 }
 
+function isThreemfFileType(fileType: string): boolean {
+  const lower = fileType.toLowerCase();
+  return lower === '3mf' || lower === 'gcode.3mf';
+}
+
+function isPreviewable3dFileType(fileType: string): boolean {
+  const lower = fileType.toLowerCase();
+  return isThreemfFileType(fileType) || lower === 'gcode' || lower === 'stl';
+}
+
 // File Card
 interface FileCardProps {
   file: LibraryFileListItem;
@@ -716,9 +726,9 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-bambu-dark flex items-center justify-center overflow-hidden">
-        {file.thumbnail_path ? (
+        {file.thumbnail_path || isThreemfFileType(file.file_type) ? (
           <img
-            src={`${api.getLibraryFileThumbnailUrl(file.id)}${thumbnailVersion ? `?v=${thumbnailVersion}` : ''}`}
+            src={`${api.getLibraryFileThumbnailUrl(file.id, file.thumbnail_path)}${thumbnailVersion ? `?v=${thumbnailVersion}` : ''}`}
             alt={file.filename}
             className="w-full h-full object-cover"
           />
@@ -727,7 +737,7 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
         )}
         {/* File type badge */}
         <div className={`absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded font-medium ${
-          file.file_type === '3mf' ? 'bg-bambu-green/90 text-white'
+          isThreemfFileType(file.file_type) ? 'bg-bambu-green/90 text-white'
           : file.file_type === 'gcode' ? 'bg-blue-500/90 text-white'
           : file.file_type === 'stl' ? 'bg-purple-500/90 text-white'
           : 'bg-bambu-gray/90 text-white'
@@ -820,7 +830,7 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
                   {t('fileManager.slice.action')}
                 </button>
               )}
-              {onPreview3d && (file.file_type === '3mf' || file.file_type === 'gcode' || file.file_type === 'stl') && (
+              {onPreview3d && isPreviewable3dFileType(file.file_type) && (
                 <button
                   className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
                     hasPermission('library:read') ? 'text-white hover:bg-bambu-dark' : 'text-bambu-gray cursor-not-allowed'
@@ -1380,7 +1390,7 @@ export function FileManagerPage() {
     <div className="p-4 md:p-8 min-h-[calc(100vh-64px)] lg:h-[calc(100vh-64px)] flex flex-col">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
+        <div data-onboarding="files-heading">
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             <div className="p-2.5 bg-bambu-green/10 rounded-xl">
               <FolderOpen className="w-6 h-6 text-bambu-green" />
@@ -1445,6 +1455,7 @@ export function FileManagerPage() {
             {t('fileManager.newFolder')}
           </Button>
           <Button
+            data-onboarding="files-upload"
             onClick={() => setShowUploadModal(true)}
             disabled={!hasPermission('library:upload')}
             title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
@@ -1948,9 +1959,9 @@ export function FileManagerPage() {
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative group/thumb">
                         <div className="w-10 h-10 rounded bg-bambu-dark flex-shrink-0 overflow-hidden">
-                          {file.thumbnail_path ? (
+                          {file.thumbnail_path || isThreemfFileType(file.file_type) ? (
                             <img
-                              src={`${api.getLibraryFileThumbnailUrl(file.id)}${thumbnailVersions[file.id] ? `?v=${thumbnailVersions[file.id]}` : ''}`}
+                              src={`${api.getLibraryFileThumbnailUrl(file.id, file.thumbnail_path)}${thumbnailVersions[file.id] ? `?v=${thumbnailVersions[file.id]}` : ''}`}
                               alt=""
                               className="w-full h-full object-cover"
                             />
@@ -1961,11 +1972,11 @@ export function FileManagerPage() {
                           )}
                         </div>
                         {/* Hover preview */}
-                        {file.thumbnail_path && (
+                        {(file.thumbnail_path || isThreemfFileType(file.file_type)) && (
                           <div className="absolute left-0 top-full mt-2 z-50 hidden group-hover/thumb:block">
                             <div className="w-48 h-48 rounded-lg bg-bambu-dark-secondary border border-bambu-dark-tertiary shadow-xl overflow-hidden">
                               <img
-                                src={`${api.getLibraryFileThumbnailUrl(file.id)}${thumbnailVersions[file.id] ? `?v=${thumbnailVersions[file.id]}` : ''}`}
+                                src={`${api.getLibraryFileThumbnailUrl(file.id, file.thumbnail_path)}${thumbnailVersions[file.id] ? `?v=${thumbnailVersions[file.id]}` : ''}`}
                                 alt={file.filename}
                                 className="w-full h-full object-contain"
                               />
@@ -1993,7 +2004,7 @@ export function FileManagerPage() {
                     {/* Type */}
                     <div>
                       <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                        file.file_type === '3mf' ? 'bg-bambu-green/20 text-bambu-green'
+                        isThreemfFileType(file.file_type) ? 'bg-bambu-green/20 text-bambu-green'
                         : file.file_type === 'gcode' ? 'bg-blue-500/20 text-blue-400'
                         : file.file_type === 'stl' ? 'bg-purple-500/20 text-purple-400'
                         : 'bg-bambu-gray/20 text-bambu-gray'
@@ -2039,7 +2050,7 @@ export function FileManagerPage() {
                           </button>
                         </>
                       )}
-                      {(file.file_type === '3mf' || file.file_type === 'gcode' || file.file_type === 'stl') && (
+                      {isPreviewable3dFileType(file.file_type) && (
                         <button
                           onClick={() => hasPermission('library:read') && setViewerFile(file)}
                           className={`p-1.5 rounded transition-colors ${

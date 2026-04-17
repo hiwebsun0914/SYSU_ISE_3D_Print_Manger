@@ -29,8 +29,6 @@ import {
   Video,
   Search,
   Loader2,
-  Square,
-  Pause,
   Play,
   X,
   Fan,
@@ -52,7 +50,19 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
-import type { Printer, PrinterCreate, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError } from '../api/client';
+import type {
+  Printer,
+  PrinterCreate,
+  AMSUnit,
+  DiscoveredPrinter,
+  FirmwareUpdateInfo,
+  FirmwareUploadStatus,
+  LinkedSpoolInfo,
+  PrintQueueItem,
+  SmartPlug,
+  SpoolAssignment,
+  HMSError,
+} from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -66,6 +76,7 @@ import { FilamentHoverCard, EmptySlotHoverCard } from '../components/FilamentHov
 import { LinkSpoolModal } from '../components/LinkSpoolModal';
 import { AssignSpoolModal } from '../components/AssignSpoolModal';
 import { ConfigureAmsSlotModal } from '../components/ConfigureAmsSlotModal';
+import { useIsSidebarCompact } from '../hooks/useIsSidebarCompact';
 import { useToast } from '../contexts/ToastContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
 import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModal';
@@ -73,7 +84,7 @@ import { FileUploadModal } from '../components/FileUploadModal';
 import { PrintModal } from '../components/PrintModal';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoolTag } from '../utils/amsHelpers';
-import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
+import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems, filterQueueItemsForPrinter } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { hexToColorName, parseFilamentColor, isLightColor } from '../utils/colors';
 
@@ -1507,6 +1518,10 @@ function PrinterCard({
   cardSize = 2,
   amsThresholds,
   spoolmanEnabled = false,
+  useSharedStatusCache = false,
+  sharedSmartPlug,
+  pendingQueueItems,
+  printingQueueItems,
   linkedSpools,
   spoolmanUrl,
   spoolmanSyncMode,
@@ -1530,6 +1545,10 @@ function PrinterCard({
     tempFair: number;
   };
   spoolmanEnabled?: boolean;
+  useSharedStatusCache?: boolean;
+  sharedSmartPlug?: SmartPlug | null;
+  pendingQueueItems?: PrintQueueItem[];
+  printingQueueItems?: PrintQueueItem[];
   hasUnlinkedSpools?: boolean;
   linkedSpools?: Record<string, LinkedSpoolInfo>;
   spoolmanUrl?: string | null;
@@ -1546,6 +1565,7 @@ function PrinterCard({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const isSidebarCompact = useIsSidebarCompact();
   const { showToast } = useToast();
   const { hasPermission } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
@@ -1557,8 +1577,6 @@ function PrinterCard({
   const [showPowerOnConfirm, setShowPowerOnConfirm] = useState(false);
   const [showPowerOffConfirm, setShowPowerOffConfirm] = useState(false);
   const [showHMSModal, setShowHMSModal] = useState(false);
-  const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState<number | null>(null);
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
@@ -1626,10 +1644,29 @@ function PrinterCard({
   const [isSavingRoi, setIsSavingRoi] = useState(false);
   const [plateCheckLightWasOff, setPlateCheckLightWasOff] = useState(false);
 
+  const openCameraView = useCallback(() => {
+    if (cameraViewMode === 'embedded' && onOpenEmbeddedCamera) {
+      onOpenEmbeddedCamera(printer.id, printer.name);
+      return;
+    }
+
+    const saved = localStorage.getItem('cameraWindowState');
+    const state = saved ? JSON.parse(saved) : { width: 640, height: 400 };
+    const features = [
+      `width=${state.width}`,
+      `height=${state.height}`,
+      state.left !== undefined ? `left=${state.left}` : '',
+      state.top !== undefined ? `top=${state.top}` : '',
+      'menubar=no,toolbar=no,location=no,status=no,noopener',
+    ].filter(Boolean).join(',');
+    window.open(`/camera/${printer.id}`, `camera-${printer.id}`, features);
+  }, [cameraViewMode, onOpenEmbeddedCamera, printer.id, printer.name]);
+
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
-    refetchInterval: 30000, // Fallback polling, WebSocket handles real-time
+    enabled: !useSharedStatusCache,
+    refetchInterval: useSharedStatusCache ? false : 30000, // Fallback polling, WebSocket handles real-time
   });
 
   // Check for firmware updates (cached for 5 minutes, can be disabled in settings)
@@ -1781,10 +1818,13 @@ function PrinterCard({
     : cachedTrayNow.current;
 
   // Fetch smart plug for this printer
-  const { data: smartPlug } = useQuery({
+  const sharedSmartPlugProvided = sharedSmartPlug !== undefined;
+  const { data: fetchedSmartPlug } = useQuery({
     queryKey: ['smartPlugByPrinter', printer.id],
     queryFn: () => api.getSmartPlugByPrinter(printer.id),
+    enabled: !sharedSmartPlugProvided,
   });
+  const smartPlug = sharedSmartPlugProvided ? sharedSmartPlug : fetchedSmartPlug;
 
   // Fetch script plugs for this printer (for multi-device control)
   const { data: scriptPlugs } = useQuery({
@@ -1801,34 +1841,39 @@ function PrinterCard({
   });
 
   // Fetch queue count for this printer
-  const { data: queueItems } = useQuery({
+  const sharedPendingQueueProvided = pendingQueueItems !== undefined;
+  const { data: fetchedPendingQueueItems } = useQuery({
     queryKey: ['queue', printer.id, 'pending'],
     queryFn: () => api.getQueue(printer.id, 'pending'),
+    enabled: !sharedPendingQueueProvided,
   });
+  const effectivePendingQueueItems = sharedPendingQueueProvided ? pendingQueueItems : fetchedPendingQueueItems;
   // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)
   // so the badge only shows on printers that can actually run the queued jobs.
   // An empty Set means no filaments are loaded — jobs requiring specific types are incompatible.
   const queueCount = useMemo(() => {
-    if (!queueItems?.length) return 0;
-    return filterCompatibleQueueItems(queueItems, loadedFilamentTypes, loadedFilaments).length;
-  }, [queueItems, loadedFilamentTypes, loadedFilaments]);
+    if (!effectivePendingQueueItems?.length) return 0;
+    return filterCompatibleQueueItems(effectivePendingQueueItems, loadedFilamentTypes, loadedFilaments).length;
+  }, [effectivePendingQueueItems, loadedFilamentTypes, loadedFilaments]);
 
   // Fetch currently printing queue item to show who started it (Issue #206)
-  const { data: printingQueueItems } = useQuery({
+  const sharedPrintingQueueProvided = printingQueueItems !== undefined;
+  const { data: fetchedPrintingQueueItems } = useQuery({
     queryKey: ['queue', printer.id, 'printing'],
     queryFn: () => api.getQueue(printer.id, 'printing'),
-    enabled: status?.state === 'RUNNING',
+    enabled: !sharedPrintingQueueProvided && status?.state === 'RUNNING',
   });
+  const effectivePrintingQueueItems = sharedPrintingQueueProvided ? printingQueueItems : fetchedPrintingQueueItems;
 
   // Fetch reprint user info (for prints started via Reprint, not queue - Issue #206)
   const { data: reprintUser } = useQuery({
     queryKey: ['currentPrintUser', printer.id],
     queryFn: () => api.getCurrentPrintUser(printer.id),
-    enabled: status?.state === 'RUNNING',
+    enabled: status?.state === 'RUNNING' && !(effectivePrintingQueueItems?.length),
   });
 
   // Combine both sources: queue item user takes precedence, then reprint user
-  const currentPrintUser = printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
+  const currentPrintUser = effectivePrintingQueueItems?.[0]?.created_by_username || reprintUser?.username;
 
   // Fetch last completed print for this printer
   const { data: lastPrints } = useQuery({
@@ -1916,25 +1961,6 @@ function PrinterCard({
       showToast(t('printers.toast.scriptTriggered'));
     },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToRunScript'), 'error'),
-  });
-
-  // Print control mutations
-  const stopPrintMutation = useMutation({
-    mutationFn: () => api.stopPrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printStopped'));
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToStopPrint'), 'error'),
-  });
-
-  const pausePrintMutation = useMutation({
-    mutationFn: () => api.pausePrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printPaused'));
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToPausePrint'), 'error'),
   });
 
   const resumePrintMutation = useMutation({
@@ -2340,6 +2366,7 @@ function PrinterCard({
 
   return (
     <Card
+      data-onboarding="printer-card"
       className="relative"
       onDragEnter={handleCardDragEnter}
       onDragOver={handleCardDragOver}
@@ -2434,17 +2461,30 @@ function PrinterCard({
                 </p>
               </div>
             </div>
-            {/* Menu button */}
-            <div className="relative flex-shrink-0">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowMenu(!showMenu)}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </Button>
-              {showMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-lg z-20">
+            {/* Mobile quick actions + menu */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {isSidebarCompact && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-onboarding="printer-camera-mobile"
+                  onClick={openCameraView}
+                  disabled={!status?.connected || !hasPermission('camera:view')}
+                  title={!hasPermission('camera:view') ? t('printers.permission.noCamera') : (cameraViewMode === 'embedded' ? t('printers.openCameraOverlay') : t('printers.openCameraWindow'))}
+                >
+                  <Video className="w-4 h-4" />
+                </Button>
+              )}
+              <div className="relative flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowMenu(!showMenu)}
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </Button>
+                {showMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-lg z-20">
                   <button
                     className={`w-full px-4 py-2 text-left text-sm flex items-center gap-2 ${
                       hasPermission('printers:update')
@@ -2508,7 +2548,8 @@ function PrinterCard({
                     {t('common.delete')}
                   </button>
                 </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -2835,7 +2876,15 @@ function PrinterCard({
                 </div>
 
                 {/* Queue Widget - always visible when there are pending items */}
-                <PrinterQueueWidget printerId={printer.id} printerModel={printer.model} printerState={status.state} plateCleared={status.plate_cleared} loadedFilamentTypes={loadedFilamentTypes} loadedFilaments={loadedFilaments} />
+                <PrinterQueueWidget
+                  printerId={printer.id}
+                  printerModel={printer.model}
+                  printerState={status.state}
+                  plateCleared={status.plate_cleared}
+                  queueItems={effectivePendingQueueItems}
+                  loadedFilamentTypes={loadedFilamentTypes}
+                  loadedFilaments={loadedFilaments}
+                />
               </>
             )}
 
@@ -2934,10 +2983,9 @@ function PrinterCard({
             {/* Controls - Fans + Print Buttons */}
             {viewMode === 'expanded' && (() => {
               // Determine print state for control buttons
-              const isRunning = status.state === 'RUNNING';
               const isPaused = status.state === 'PAUSE';
-              const isPrinting = isRunning || isPaused;
-              const isControlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
+              const isPrinting = status.state === 'RUNNING' || isPaused;
+              const isControlBusy = resumePrintMutation.isPending;
 
               // Fan data
               const partFan = status.cooling_fan_speed;
@@ -3053,45 +3101,26 @@ function PrinterCard({
                     </div>
 
                     {/* Right: Print Control Buttons */}
-                    <div className="flex items-center gap-2 flex-shrink-0 max-[550px]:self-start">
-                      {/* Stop button */}
-                      <button
-                        onClick={() => setShowStopConfirm(true)}
-                        disabled={!isPrinting || isControlBusy || !hasPermission('printers:control')}
-                        className={`
-                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
-                          transition-colors
-                          ${isPrinting && hasPermission('printers:control')
-                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                            : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
-                          }
-                        `}
-                        title={!hasPermission('printers:control') ? t('printers.permission.noControl') : t('printers.stop')}
-                      >
-                        <Square className="w-3 h-3" />
-                        {t('printers.stop')}
-                      </button>
-
-                      {/* Pause/Resume button */}
-                      <button
-                        onClick={() => isPaused ? setShowResumeConfirm(true) : setShowPauseConfirm(true)}
-                        disabled={!isPrinting || isControlBusy || !hasPermission('printers:control')}
-                        className={`
-                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
-                          transition-colors
-                          ${isPrinting && hasPermission('printers:control')
-                            ? isPaused
+                    {isPaused && (
+                      <div className="flex items-center gap-2 flex-shrink-0 max-[550px]:self-start">
+                        <button
+                          onClick={() => setShowResumeConfirm(true)}
+                          disabled={isControlBusy || !hasPermission('printers:control')}
+                          className={`
+                            flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                            transition-colors
+                            ${hasPermission('printers:control')
                               ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                              : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
-                            : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
-                          }
-                        `}
-                        title={!hasPermission('printers:control') ? t('printers.permission.noControl') : (isPaused ? t('printers.resume') : t('printers.pause'))}
-                      >
-                        {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-                        {isPaused ? t('printers.resume') : t('printers.pause')}
-                      </button>
-                    </div>
+                              : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
+                            }
+                          `}
+                          title={!hasPermission('printers:control') ? t('printers.permission.noControl') : t('printers.resume')}
+                        >
+                          <Play className="w-3 h-3" />
+                          {t('printers.resume')}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -4146,23 +4175,8 @@ function PrinterCard({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => {
-                  if (cameraViewMode === 'embedded' && onOpenEmbeddedCamera) {
-                    onOpenEmbeddedCamera(printer.id, printer.name);
-                  } else {
-                    // Use saved window state or defaults
-                    const saved = localStorage.getItem('cameraWindowState');
-                    const state = saved ? JSON.parse(saved) : { width: 640, height: 400 };
-                    const features = [
-                      `width=${state.width}`,
-                      `height=${state.height}`,
-                      state.left !== undefined ? `left=${state.left}` : '',
-                      state.top !== undefined ? `top=${state.top}` : '',
-                      'menubar=no,toolbar=no,location=no,status=no,noopener',
-                    ].filter(Boolean).join(',');
-                    window.open(`/camera/${printer.id}`, `camera-${printer.id}`, features);
-                  }
-                }}
+                data-onboarding="printer-camera"
+                onClick={openCameraView}
                 disabled={!status?.connected || !hasPermission('camera:view')}
                 title={!hasPermission('camera:view') ? t('printers.permission.noCamera') : (cameraViewMode === 'embedded' ? t('printers.openCameraOverlay') : t('printers.openCameraWindow'))}
               >
@@ -4588,36 +4602,6 @@ function PrinterCard({
             setShowPowerOffConfirm(false);
           }}
           onCancel={() => setShowPowerOffConfirm(false)}
-        />
-      )}
-
-      {/* Stop Print Confirmation */}
-      {showStopConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.stopTitle')}
-          message={t('printers.confirm.stopMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.stopButton')}
-          variant="danger"
-          onConfirm={() => {
-            stopPrintMutation.mutate();
-            setShowStopConfirm(false);
-          }}
-          onCancel={() => setShowStopConfirm(false)}
-        />
-      )}
-
-      {/* Pause Print Confirmation */}
-      {showPauseConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.pauseTitle')}
-          message={t('printers.confirm.pauseMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.pauseButton')}
-          variant="default"
-          onConfirm={() => {
-            pausePrintMutation.mutate();
-            setShowPauseConfirm(false);
-          }}
-          onCancel={() => setShowPauseConfirm(false)}
         />
       )}
 
@@ -5760,6 +5744,30 @@ export function PrintersPage() {
     queryKey: ['printers'],
     queryFn: api.getPrinters,
   });
+  const printerIds = useMemo(() => printers?.map((printer) => printer.id) ?? [], [printers]);
+
+  const {
+    data: batchedPrinterStatuses,
+    isLoading: areStatusesLoading,
+    isError: didBatchStatusesFail,
+  } = useQuery({
+    queryKey: ['printer-statuses', printerIds],
+    queryFn: async () => {
+      const statuses = await api.getPrinterStatuses(printerIds);
+      statuses.forEach((status) => {
+        queryClient.setQueryData(['printerStatus', status.id], status);
+      });
+      return statuses;
+    },
+    enabled: printerIds.length > 0,
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+  });
+  const useSharedStatusCache = !didBatchStatusesFail && printerIds.length > 0;
+  const hasRunningPrinters = useMemo(
+    () => batchedPrinterStatuses?.some((status) => status.state === 'RUNNING') ?? false,
+    [batchedPrinterStatuses]
+  );
 
   // Fetch app settings for AMS thresholds
   const { data: settings } = useQuery({
@@ -5791,6 +5799,20 @@ export function PrintersPage() {
   const { data: smartPlugs } = useQuery({
     queryKey: ['smart-plugs'],
     queryFn: api.getSmartPlugs,
+  });
+
+  const { data: allPendingQueueItems } = useQuery({
+    queryKey: ['queue', 'pending'],
+    queryFn: () => api.getQueue(undefined, 'pending'),
+    enabled: printerIds.length > 0,
+    staleTime: 5 * 1000,
+  });
+
+  const { data: allPrintingQueueItems } = useQuery({
+    queryKey: ['queue', 'printing'],
+    queryFn: () => api.getQueue(undefined, 'printing'),
+    enabled: printerIds.length > 0 && hasRunningPrinters,
+    staleTime: 5 * 1000,
   });
 
   // Fetch maintenance overview for all printers to show badges
@@ -5879,8 +5901,40 @@ export function PrintersPage() {
       }
       return acc;
     },
-    {} as Record<number, typeof smartPlugs[0]>
+    {} as Record<number, SmartPlug>
   ) || {};
+
+  const pendingQueueByPrinter = useMemo(() => {
+    const grouped: Record<number, PrintQueueItem[]> = {};
+    if (!printers?.length || !allPendingQueueItems?.length) {
+      return grouped;
+    }
+
+    printers.forEach((printer) => {
+      grouped[printer.id] = filterQueueItemsForPrinter(allPendingQueueItems, printer.id, printer.model);
+    });
+
+    return grouped;
+  }, [allPendingQueueItems, printers]);
+
+  const printingQueueByPrinter = useMemo(() => {
+    const grouped: Record<number, PrintQueueItem[]> = {};
+    if (!allPrintingQueueItems?.length) {
+      return grouped;
+    }
+
+    allPrintingQueueItems.forEach((item) => {
+      if (item.printer_id == null) {
+        return;
+      }
+      if (!grouped[item.printer_id]) {
+        grouped[item.printer_id] = [];
+      }
+      grouped[item.printer_id].push(item);
+    });
+
+    return grouped;
+  }, [allPrintingQueueItems]);
 
   const addMutation = useMutation({
     mutationFn: api.createPrinter,
@@ -5999,7 +6053,7 @@ export function PrintersPage() {
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('printers.title')}</h1>
+          <h1 data-onboarding="printers-heading" className="text-2xl font-bold text-white">{t('printers.title')}</h1>
           <StatusSummaryBar printers={printers} />
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -6113,6 +6167,7 @@ export function PrintersPage() {
             </div>
           )}
           <Button
+            data-onboarding="printers-add"
             onClick={() => setShowAddModal(true)}
             disabled={!hasPermission('printers:create')}
             title={!hasPermission('printers:create') ? t('printers.permission.noAdd') : undefined}
@@ -6123,13 +6178,14 @@ export function PrintersPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {isLoading || (useSharedStatusCache && areStatusesLoading) ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
       ) : printers?.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-bambu-gray mb-4">{t('printers.noPrintersConfigured')}</p>
             <Button
+              data-onboarding="printers-add"
               onClick={() => setShowAddModal(true)}
               disabled={!hasPermission('printers:create')}
               title={!hasPermission('printers:create') ? t('printers.permission.noAdd') : undefined}
@@ -6158,6 +6214,10 @@ export function PrintersPage() {
                     maintenanceInfo={maintenanceByPrinter[printer.id]}
                     viewMode={viewMode}
                     cardSize={cardSize}
+                    useSharedStatusCache={useSharedStatusCache}
+                    sharedSmartPlug={smartPlugByPrinter[printer.id] ?? null}
+                    pendingQueueItems={pendingQueueByPrinter[printer.id] ?? []}
+                    printingQueueItems={printingQueueByPrinter[printer.id] ?? []}
                     amsThresholds={settings ? {
                       humidityGood: Number(settings.ams_humidity_good) || 40,
                       humidityFair: Number(settings.ams_humidity_fair) || 60,
@@ -6193,6 +6253,10 @@ export function PrintersPage() {
               maintenanceInfo={maintenanceByPrinter[printer.id]}
               viewMode={viewMode}
               cardSize={cardSize}
+              useSharedStatusCache={useSharedStatusCache}
+              sharedSmartPlug={smartPlugByPrinter[printer.id] ?? null}
+              pendingQueueItems={pendingQueueByPrinter[printer.id] ?? []}
+              printingQueueItems={printingQueueByPrinter[printer.id] ?? []}
               spoolmanEnabled={spoolmanEnabled}
               hasUnlinkedSpools={hasUnlinkedSpools}
               linkedSpools={linkedSpools}

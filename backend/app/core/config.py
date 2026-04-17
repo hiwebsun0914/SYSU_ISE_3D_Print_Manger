@@ -77,7 +77,35 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api/v1"
     queue_contact_view_password: str = "sysuzgxytj"
+    queue_admin_action_password: str = "sysuzgxytj"
     cors_allowed_origins: list[str] = Field(default_factory=list, alias="CORS_ALLOWED_ORIGINS")
+    public_file_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("PUBLIC_FILE_BASE_URL", "VITE_PUBLIC_FILE_BASE_URL"),
+    )
+    public_file_upload_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("PUBLIC_FILE_UPLOAD_BASE_URL", "PUBLIC_FILE_BASE_URL", "VITE_PUBLIC_FILE_BASE_URL"),
+    )
+    makerworld_title_ai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("MAKERWORLD_TITLE_AI_API_KEY", "ZHIPUAI_API_KEY"),
+    )
+    makerworld_title_ai_model: str = Field(
+        default="glm-4-plus",
+        validation_alias=AliasChoices("MAKERWORLD_TITLE_AI_MODEL", "ZHIPUAI_MODEL"),
+    )
+    public_live_camera_frame_interval_seconds: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices(
+            "PUBLIC_LIVE_CAMERA_FRAME_INTERVAL_SECONDS",
+            "PUBLIC_LIVE_CAMERA_UPLOAD_INTERVAL_SECONDS",
+        ),
+    )
+    public_live_camera_rotation_seconds: float = 10.0
+    public_live_camera_idle_timeout_seconds: float = 10.0
+    public_live_camera_capture_timeout_seconds: int = 20
+    public_live_camera_upload_timeout_seconds: int = 20
 
     # Headless slicing
     bambu_studio_cli: str = "bambu-studio"

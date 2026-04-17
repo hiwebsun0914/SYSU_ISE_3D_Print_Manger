@@ -812,7 +812,7 @@ function InventoryPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div data-onboarding="inventory-header" className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3">
             <Package className="w-6 h-6 text-bambu-green" />
@@ -820,7 +820,7 @@ function InventoryPage() {
           </div>
           <p className="text-sm text-bambu-gray mt-1 ml-9">{t('inventory.noSpools').split('.')[0] ? '' : ''}</p>
         </div>
-        <Button onClick={() => setFormModal({ spool: null })}>
+        <Button data-onboarding="inventory-add" onClick={() => setFormModal({ spool: null })}>
           <Plus className="w-4 h-4" />
           {t('inventory.addSpool')}
         </Button>
@@ -828,7 +828,7 @@ function InventoryPage() {
 
       {/* Stats Bar */}
       {stats && !isLoading && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div data-onboarding="inventory-stats" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {/* Total Inventory */}
           <div className="bg-bambu-dark-secondary rounded-lg p-4">
             <div className="flex items-center gap-2 mb-1">

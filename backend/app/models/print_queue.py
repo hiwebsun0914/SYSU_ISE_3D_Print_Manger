@@ -38,6 +38,7 @@ class PrintQueueItem(Base):
     requester_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     request_model_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_model_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     request_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
 

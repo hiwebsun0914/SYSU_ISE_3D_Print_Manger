@@ -15,6 +15,8 @@ from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
 from backend.app.models.filament import Filament
 from backend.app.models.printer import Printer
+from backend.app.services.public_file_sync import delete_public_file, sync_public_file
+from backend.app.utils.threemf_tools import find_thumbnail_entry_in_3mf
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +24,52 @@ logger = logging.getLogger(__name__)
 class ThreeMFParser:
     """Parser for Bambu Lab 3MF files."""
 
-    def __init__(self, file_path: Path, plate_number: int | None = None):
-        self.file_path = file_path
+    def __init__(self, file_path: str | Path, plate_number: int | None = None):
+        self.file_path = Path(file_path)
         self.plate_number = plate_number  # Which plate was printed (1, 2, 3, etc.)
         self.metadata: dict = {}
+
+    @staticmethod
+    def _extract_plate_index(plate_elem) -> int | None:
+        """Read the plate index from attributes or metadata."""
+        attr_value = plate_elem.get("plate_idx")
+        if attr_value:
+            try:
+                return int(attr_value)
+            except ValueError:
+                pass
+
+        for meta in plate_elem.findall("metadata"):
+            if meta.get("key") == "index":
+                try:
+                    return int(meta.get("value", "0"))
+                except ValueError:
+                    return None
+        return None
+
+    def _select_plate_element(self, root) -> object | None:
+        """Pick the most relevant <plate> node for metadata extraction."""
+        plates = root.findall(".//plate")
+        if not plates:
+            return None
+
+        if self.plate_number is not None:
+            for plate in plates:
+                if self._extract_plate_index(plate) == self.plate_number:
+                    return plate
+
+        return plates[0]
+
+    def extract_thumbnail(self) -> bytes | None:
+        """Return the best available preview image from the 3MF file."""
+        try:
+            with zipfile.ZipFile(self.file_path, "r") as zf:
+                entry = find_thumbnail_entry_in_3mf(zf, plate_number=self.plate_number)
+                if entry:
+                    return zf.read(entry)
+        except Exception:
+            pass
+        return None
 
     def parse(self) -> dict:
         """Extract metadata from 3MF file."""
@@ -80,8 +124,7 @@ class ThreeMFParser:
                             self.metadata["sliced_for_model"] = normalized
                         break
 
-                # Find the plate element (single-plate exports only have one plate)
-                plate = root.find(".//plate")
+                plate = self._select_plate_element(root)
 
                 if plate is not None:
                     # Extract metadata from plate element
@@ -122,10 +165,28 @@ class ThreeMFParser:
                     if printable_objects:
                         self.metadata["printable_objects"] = printable_objects
 
+                filament_elements = []
+                if plate is not None:
+                    filament_elements = plate.findall("filament")
+                if not filament_elements:
+                    filament_elements = root.findall("./filament")
+                if not filament_elements:
+                    filament_elements = root.findall(".//filament")
+
+                if "filament_used_grams" not in self.metadata and filament_elements:
+                    total_used = 0.0
+                    for filament_elem in filament_elements:
+                        try:
+                            total_used += float(filament_elem.get("used_g", "0") or "0")
+                        except (ValueError, TypeError):
+                            continue
+                    if total_used > 0:
+                        self.metadata["filament_used_grams"] = round(total_used, 2)
+
                 # Get filament info from filaments ACTUALLY USED in the print
                 # slice_info has <filament id="1" type="PLA" color="#FFFFFF" used_g="100" />
                 # Only include filaments where used_g > 0
-                filaments = root.findall(".//filament")
+                filaments = filament_elements
                 if filaments:
                     # Collect unique filament types and colors for filaments that are actually used
                     types = []
@@ -381,26 +442,10 @@ class ThreeMFParser:
 
         If a plate_number was specified, try to use that plate's thumbnail first.
         """
-        thumbnail_paths = []
-
-        # If a specific plate was printed, try that thumbnail first
-        if self.plate_number:
-            thumbnail_paths.append(f"Metadata/plate_{self.plate_number}.png")
-
-        # Fallback to default paths
-        thumbnail_paths.extend(
-            [
-                "Metadata/plate_1.png",
-                "Metadata/thumbnail.png",
-                "Metadata/model_thumbnail.png",
-            ]
-        )
-
-        for thumb_path in thumbnail_paths:
-            if thumb_path in zf.namelist():
-                self.metadata["_thumbnail_data"] = zf.read(thumb_path)
-                self.metadata["_thumbnail_ext"] = ".png"
-                break
+        thumb_path = find_thumbnail_entry_in_3mf(zf, plate_number=self.plate_number)
+        if thumb_path:
+            self.metadata["_thumbnail_data"] = zf.read(thumb_path)
+            self.metadata["_thumbnail_ext"] = Path(thumb_path).suffix.lower() or ".png"
 
 
 def extract_printable_objects_from_3mf(
@@ -898,6 +943,7 @@ class ArchiveService:
             thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
             thumb_file.write_bytes(metadata["_thumbnail_data"])
             thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
+            await sync_public_file(thumbnail_path, thumb_file)
             del metadata["_thumbnail_data"]
             del metadata["_thumbnail_ext"]
 
@@ -1091,10 +1137,14 @@ class ArchiveService:
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.
+        public_paths_to_delete = [archive.thumbnail_path, archive.timelapse_path]
         await self.db.delete(archive)
         await self.db.commit()
 
         # Only delete files AFTER the DB commit succeeds to avoid orphaned records
+        for public_path in public_paths_to_delete:
+            await delete_public_file(public_path)
+
         if dir_to_delete:
             shutil.rmtree(dir_to_delete, ignore_errors=True)
 
@@ -1129,6 +1179,7 @@ class ArchiveService:
         # Update archive record
         archive.timelapse_path = str(timelapse_file.relative_to(settings.base_dir))
         await self.db.commit()
+        await sync_public_file(archive.timelapse_path, timelapse_file)
 
         # For non-MP4 videos (e.g. AVI from P1S), kick off background conversion
         if not filename.lower().endswith(".mp4"):
@@ -1220,8 +1271,12 @@ async def _convert_timelapse_to_mp4(archive_id: int, source_path: Path) -> None:
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
             archive = result.scalar_one_or_none()
             if archive:
+                old_timelapse_path = archive.timelapse_path
                 archive.timelapse_path = str(mp4_path.relative_to(settings.base_dir))
                 await db.commit()
+                await sync_public_file(archive.timelapse_path, mp4_path, content_type="video/mp4")
+                if old_timelapse_path and old_timelapse_path != archive.timelapse_path:
+                    await delete_public_file(old_timelapse_path)
 
         # Remove original non-MP4 file
         if source_path.exists():

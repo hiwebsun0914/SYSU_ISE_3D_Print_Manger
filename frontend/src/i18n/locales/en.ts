@@ -925,6 +925,12 @@ export default {
       contactEmailValue: 'Email: {{value}}',
       hiddenValue: 'Hidden',
     },
+    admin: {
+      unlockTitle: 'Unlock Delete Access',
+      unlockDescription: 'Enter the admin password before deleting queue items.',
+      unlockPassword: 'Admin Password',
+      unlockSubmit: 'Unlock Delete',
+    },
     // Empty state
     empty: {
       title: 'No prints scheduled',
@@ -1010,6 +1016,9 @@ export default {
       contactsUnlocked: 'Name and email revealed',
       contactsHidden: 'Name and email hidden again',
       unlockContactsFailed: 'Invalid password for protected contact details',
+      adminAccessUnlocked: 'Queue delete access unlocked',
+      unlockAdminFailed: 'Invalid admin password for queue deletion',
+      adminAccessExpired: 'Admin password expired. Please unlock delete access again.',
     },
     // Permissions
     permissions: {
@@ -1020,6 +1029,7 @@ export default {
       noRequeue: 'You do not have permission to re-queue items',
       noRemove: 'You do not have permission to remove this queue item',
       noClearHistory: 'You do not have permission to clear all history',
+      noAdminAccess: 'Admin password required before deleting queue items',
       noEditItems: 'You do not have permission to edit queue items',
       noCancelItems: 'You do not have permission to cancel queue items',
       noStatusChange: 'You do not have permission to change this request status',
@@ -4865,6 +4875,46 @@ export default {
       creating: 'Creating...',
       spoolCreated: 'Spool created! Ready to write.',
       createFailed: 'Failed to create spool',
+    },
+  },
+
+  onboarding: {
+    label: 'Quick Start',
+    skip: 'Skip',
+    autoAdvance: 'Use the buttons below to continue step by step. You can skip it in the top-right corner.',
+    previous: 'Previous',
+    next: 'Next',
+    finish: 'Finish',
+    stepCounter: '{{current}} / {{total}}',
+    steps: {
+      printers: {
+        title: 'Printers',
+        description: 'This is your printer home. Start here to see device status, jobs, and common controls.',
+      },
+      camera: {
+        title: 'Live Camera',
+        description: 'Use this button to open the printer camera and quickly check progress or spot issues.',
+      },
+      queue: {
+        title: 'Queue',
+        description: 'Use the queue to arrange print order, hold jobs for later, and manage who prints next.',
+      },
+      stats: {
+        title: 'Statistics',
+        description: 'Here you can review print counts, duration, materials, failures, and long-term usage trends.',
+      },
+      inventory: {
+        title: 'Material Management',
+        description: 'Manage spools, check remaining weight, and see which materials are loaded in printers.',
+      },
+      modelLibrary: {
+        title: 'Model Library',
+        description: 'Search models here first. After finding one, you can submit the link into the queue or upload your own file from File Manager.',
+      },
+      slicer: {
+        title: 'Slicing Workspace',
+        description: 'Open the online slicer here to place a model, adjust settings, and try the slicing workflow.',
+      },
     },
   },
 

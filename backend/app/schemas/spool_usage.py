@@ -8,6 +8,7 @@ class SpoolUsageHistoryResponse(BaseModel):
     spool_id: int
     printer_id: int | None = None
     print_name: str | None = None
+    archive_id: int | None = None
     weight_used: float
     percent_used: int
     status: str

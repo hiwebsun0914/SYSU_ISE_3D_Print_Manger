@@ -90,6 +90,7 @@ class PrintQueueItemResponse(BaseModel):
     contact_email: str | None = None
     contact_details_hidden: bool = False
     request_model_url: str | None = None
+    request_model_title: str | None = None
     request_notes: str | None = None
     position: int
     scheduled_time: UTCDatetime

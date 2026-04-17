@@ -75,7 +75,11 @@ from backend.app.services.bambu_studio_slicer import (
     slice_stl_with_bambu_studio,
 )
 from backend.app.services.stl_thumbnail import generate_stl_thumbnail
-from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
+from backend.app.utils.threemf_tools import (
+    extract_nozzle_mapping_from_3mf,
+    find_thumbnail_entry_in_3mf,
+    read_thumbnail_from_3mf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1303,19 +1307,23 @@ async def scan_external_folder(
                 if inner == ".gcode":
                     file_type = "gcode.3mf"
 
-            # Extract thumbnail for 3mf files
+            is_threemf_container = filepath.name.lower().endswith(".3mf")
+
+            # Extract metadata/thumbnail for 3MF containers, including .gcode.3mf
             thumbnail_path = None
             file_metadata = None
-            if file_type == "3mf":
+            if is_threemf_container:
                 try:
-                    parser = ThreeMFParser(str(filepath))
+                    parser = ThreeMFParser(filepath)
                     meta = parser.parse()
                     if meta:
-                        file_metadata = meta
-                    thumb_data = parser.extract_thumbnail()
+                        cleaned_metadata = _clean_threemf_metadata(meta)
+                        file_metadata = cleaned_metadata if cleaned_metadata else None
+                    thumb_data = meta.get("_thumbnail_data") if meta else None
+                    thumb_ext = meta.get("_thumbnail_ext", ".png") if meta else ".png"
                     if thumb_data:
                         thumb_dir = get_library_thumbnails_dir()
-                        thumb_filename = f"{uuid.uuid4().hex}.png"
+                        thumb_filename = f"{uuid.uuid4().hex}{thumb_ext}"
                         thumb_full = thumb_dir / thumb_filename
                         thumb_full.write_bytes(thumb_data)
                         thumbnail_path = to_relative_path(thumb_full)
@@ -1326,7 +1334,7 @@ async def scan_external_folder(
             if file_type == "stl" and thumbnail_path is None:
                 try:
                     thumb_dir = get_library_thumbnails_dir()
-                    thumb_result = generate_stl_thumbnail(str(filepath), str(thumb_dir))
+                    thumb_result = generate_stl_thumbnail(filepath, thumb_dir)
                     if thumb_result:
                         thumbnail_path = to_relative_path(Path(thumb_result))
                 except Exception as e:
@@ -2498,7 +2506,7 @@ async def get_library_file_plates(
             # Build plate list
             for idx in plate_indices:
                 meta = plate_metadata.get(idx, {})
-                has_thumbnail = f"Metadata/plate_{idx}.png" in namelist
+                has_thumbnail = find_thumbnail_entry_in_3mf(zf, plate_number=idx) is not None
                 objects = meta.get("objects", [])
                 if not objects:
                     objects = plate_json_objects.get(idx, [])
@@ -2561,10 +2569,10 @@ async def get_library_file_plate_thumbnail(
 
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            thumb_path = f"Metadata/plate_{plate_index}.png"
-            if thumb_path in zf.namelist():
-                data = zf.read(thumb_path)
-                return Response(content=data, media_type="image/png")
+            thumbnail = read_thumbnail_from_3mf(zf, plate_number=plate_index)
+            if thumbnail:
+                _entry, data, content_type = thumbnail
+                return Response(content=data, media_type=content_type)
     except Exception:
         pass  # Archive unreadable or thumbnail missing; fall through to 404
 
@@ -3080,21 +3088,32 @@ async def get_thumbnail(file_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="File not found")
 
     abs_thumb_path = to_absolute_path(file.thumbnail_path)
-    if not abs_thumb_path or not abs_thumb_path.exists():
-        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    if abs_thumb_path and abs_thumb_path.exists():
+        # Detect media type from extension
+        thumb_ext = abs_thumb_path.suffix.lower()
+        media_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }
+        media_type = media_types.get(thumb_ext, "image/png")
 
-    # Detect media type from extension
-    thumb_ext = abs_thumb_path.suffix.lower()
-    media_types = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-    }
-    media_type = media_types.get(thumb_ext, "image/png")
+        return FastAPIFileResponse(str(abs_thumb_path), media_type=media_type)
 
-    return FastAPIFileResponse(str(abs_thumb_path), media_type=media_type)
+    abs_path = to_absolute_path(file.file_path)
+    if abs_path and abs_path.exists() and file.filename.lower().endswith(".3mf"):
+        try:
+            with zipfile.ZipFile(abs_path, "r") as zf:
+                thumbnail = read_thumbnail_from_3mf(zf)
+                if thumbnail:
+                    _entry, data, content_type = thumbnail
+                    return Response(content=data, media_type=content_type)
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
 @router.get("/files/{file_id}/gcode")

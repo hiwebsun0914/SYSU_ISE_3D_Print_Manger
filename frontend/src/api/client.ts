@@ -6,6 +6,28 @@ function normalizeBaseUrl(value: string | undefined, fallback: string): string {
 }
 
 const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_BASE as string | undefined, '/api/v1');
+const PUBLIC_FILE_BASE = normalizeBaseUrl(import.meta.env.VITE_PUBLIC_FILE_BASE_URL as string | undefined, '');
+
+export function getPublicFileUrl(relativePath: string | null | undefined): string | null {
+  if (!PUBLIC_FILE_BASE || !relativePath) {
+    return null;
+  }
+  const normalizedPath = relativePath.replace(/^\/+/, '');
+  return `${PUBLIC_FILE_BASE}/${normalizedPath}`;
+}
+
+export function getPublicPrinterLiveFrameUrl(printerId: number, cacheBust?: number): string | null {
+  if (!PUBLIC_FILE_BASE) {
+    return null;
+  }
+  const baseUrl = `${API_BASE}/printers/${printerId}/camera/public-live-frame`;
+  return cacheBust ? `${baseUrl}?t=${cacheBust}` : baseUrl;
+}
+
+export function getOnDemandPrinterLiveFrameUrl(printerId: number, cacheBust?: number): string {
+  const baseUrl = `${API_BASE}/printers/${printerId}/camera/public-live-frame`;
+  return cacheBust ? `${baseUrl}?t=${cacheBust}` : baseUrl;
+}
 
 // Auth token storage
 let authToken: string | null = localStorage.getItem('auth_token');
@@ -1285,6 +1307,7 @@ export interface PrintQueueItem {
   contact_email: string | null;
   contact_details_hidden: boolean;
   request_model_url: string | null;
+  request_model_title: string | null;
   request_notes: string | null;
   position: number;
   scheduled_time: string | null;
@@ -1911,6 +1934,7 @@ export interface SpoolUsageRecord {
   spool_id: number;
   printer_id: number | null;
   print_name: string | null;
+  archive_id: number | null;
   weight_used: number;
   percent_used: number;
   status: string;
@@ -2415,6 +2439,12 @@ export const api = {
     if (location) params.set('location', location);
     return request<Array<{ type: string; color: string; tray_info_idx: string; tray_sub_brands: string; extruder_id: number | null }>>(`/printers/available-filaments?${params}`);
   },
+  getPrinterStatuses: (printerIds?: number[]) => {
+    const params = new URLSearchParams();
+    printerIds?.forEach((id) => params.append('printer_ids', String(id)));
+    const query = params.toString();
+    return request<PrinterStatus[]>(query ? `/printers/statuses?${query}` : '/printers/statuses');
+  },
   getPrinterStatus: (id: number) =>
     request<PrinterStatus>(`/printers/${id}/status`),
   refreshPrinterStatus: (id: number) =>
@@ -2785,7 +2815,7 @@ export const api = {
     request<{ updated: number; errors: Array<{ id: number; error: string }> }>('/archives/backfill-hashes', {
       method: 'POST',
     }),
-  getArchiveThumbnail: (id: number) => `${API_BASE}/archives/${id}/thumbnail?v=${Date.now()}`,
+  getArchiveThumbnail: (id: number, _relativePath?: string | null) => `${API_BASE}/archives/${id}/thumbnail?v=${Date.now()}`,
   getArchivePlateThumbnail: (id: number, plateIndex: number) =>
     `${API_BASE}/archives/${id}/plate-thumbnail/${plateIndex}`,
   getArchiveDownload: (id: number) => `${API_BASE}/archives/${id}/download`,
@@ -2813,7 +2843,10 @@ export const api = {
   },
   getArchiveGcode: (id: number) => `${API_BASE}/archives/${id}/gcode`,
   getArchivePlatePreview: (id: number) => `${API_BASE}/archives/${id}/plate-preview`,
-  getArchiveTimelapse: (id: number) => `${API_BASE}/archives/${id}/timelapse?v=${Date.now()}`,
+  getArchiveTimelapse: (id: number, relativePath?: string | null) => {
+    const publicUrl = getPublicFileUrl(relativePath);
+    return publicUrl ? `${publicUrl}?v=${Date.now()}` : `${API_BASE}/archives/${id}/timelapse?v=${Date.now()}`;
+  },
   scanArchiveTimelapse: (id: number) =>
     request<{
       status: string;
@@ -3388,6 +3421,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ password }),
     }),
+  validateQueueAdminAccess: (password: string) =>
+    request<QueueContactAccessResponse>('/queue/admin-access', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
   addToQueue: (data: PrintQueueItemCreate) =>
     request<PrintQueueItem>('/queue/', {
       method: 'POST',
@@ -3403,8 +3441,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  removeFromQueue: (id: number) =>
-    request<{ message: string }>(`/queue/${id}`, { method: 'DELETE' }),
+  removeFromQueue: (id: number, adminPassword?: string) =>
+    request<{ message: string }>(`/queue/${id}`, {
+      method: 'DELETE',
+      headers: adminPassword ? { 'X-Queue-Admin-Password': adminPassword } : undefined,
+    }),
   reorderQueue: (items: { id: number; position: number }[]) =>
     request<{ message: string }>('/queue/reorder', {
       method: 'POST',
@@ -4238,7 +4279,8 @@ export const api = {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   },
-  getLibraryFileThumbnailUrl: (id: number) => `${API_BASE}/library/files/${id}/thumbnail`,
+  getLibraryFileThumbnailUrl: (id: number, relativePath?: string | null) =>
+    getPublicFileUrl(relativePath) ?? `${API_BASE}/library/files/${id}/thumbnail`,
   getLibraryFilePlateThumbnail: (id: number, plateIndex: number) =>
     `${API_BASE}/library/files/${id}/plate-thumbnail/${plateIndex}`,
   getLibraryFileGcodeUrl: (id: number) => `${API_BASE}/library/files/${id}/gcode`,

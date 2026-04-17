@@ -27,6 +27,11 @@ interface Capabilities {
   filament_colors: string[];
 }
 
+function isThreemfFileType(fileType?: string): boolean {
+  const normalizedType = (fileType || '').toLowerCase();
+  return normalizedType === '3mf' || normalizedType === 'gcode.3mf';
+}
+
 export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, onClose }: ModelViewerModalProps) {
   const { t } = useTranslation();
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
@@ -64,8 +69,9 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
 
     if (isLibrary) {
       const normalizedType = (fileType || '').toLowerCase();
-      const hasModel = normalizedType === '3mf' || normalizedType === 'stl';
-      const hasGcode = normalizedType === 'gcode' || normalizedType === '3mf';
+      const hasThreemf = isThreemfFileType(fileType);
+      const hasModel = hasThreemf || normalizedType === 'stl';
+      const hasGcode = normalizedType === 'gcode' || hasThreemf;
       setCapabilities({
         has_model: hasModel,
         has_gcode: hasGcode,
@@ -110,8 +116,7 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
     setPlatePage(0);
 
     if (isLibrary) {
-      const normalizedType = (fileType || '').toLowerCase();
-      if (!libraryFileId || normalizedType !== '3mf') {
+      if (!libraryFileId || !isThreemfFileType(fileType)) {
         setPlatesData(null);
         setPlatesLoading(false);
         return;
@@ -261,7 +266,7 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
     };
   }, [isDraggingDivider, dividerHeight, minPlateHeight, minViewerPx, minViewerRatio]);
 
-  const canOpenInSlicer = isLibrary ? (fileType || '').toLowerCase() === '3mf' : true;
+  const canOpenInSlicer = isLibrary ? isThreemfFileType(fileType) : true;
 
   const handleOpenInSlicer = async () => {
     if (!canOpenInSlicer) return;

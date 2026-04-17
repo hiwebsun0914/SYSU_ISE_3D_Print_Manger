@@ -4666,6 +4666,46 @@ export default {
     },
   },
 
+  onboarding: {
+    label: 'Schnellstart',
+    skip: 'Überspringen',
+    autoAdvance: 'Mit den Schaltflächen unten gehen Sie Schritt für Schritt weiter. Oben rechts können Sie jederzeit überspringen.',
+    previous: 'Zurück',
+    next: 'Weiter',
+    finish: 'Fertig',
+    stepCounter: '{{current}} / {{total}}',
+    steps: {
+      printers: {
+        title: 'Drucker',
+        description: 'Hier sehen Sie Ihre Druckerübersicht mit Status, Aufgaben und den wichtigsten Aktionen.',
+      },
+      camera: {
+        title: 'Live-Kamera',
+        description: 'Mit dieser Schaltfläche öffnen Sie die Druckerkamera und prüfen schnell Fortschritt oder Probleme.',
+      },
+      queue: {
+        title: 'Warteschlange',
+        description: 'Hier ordnen Sie Druckaufträge, halten Jobs zurück und steuern, was als Nächstes gedruckt wird.',
+      },
+      stats: {
+        title: 'Statistiken',
+        description: 'Hier sehen Sie Druckanzahl, Laufzeit, Materialverbrauch, Fehler und langfristige Nutzungstrends.',
+      },
+      inventory: {
+        title: 'Materialverwaltung',
+        description: 'Hier verwalten Sie Spulen, Restgewicht und sehen, welche Materialien in den Druckern geladen sind.',
+      },
+      modelLibrary: {
+        title: 'Modellbibliothek',
+        description: 'Suchen Sie hier zuerst nach Modellen. Danach können Sie den Link in die Warteschlange übernehmen oder eigene Dateien im Dateimanager hochladen.',
+      },
+      slicer: {
+        title: 'Slicing-Arbeitsbereich',
+        description: 'Öffnen Sie hier den Online-Slicer, platzieren Sie ein Modell und probieren Sie den Slicing-Ablauf aus.',
+      },
+    },
+  },
+
   bugReport: {
     title: 'Fehler melden',
     description: 'Beschreibung',

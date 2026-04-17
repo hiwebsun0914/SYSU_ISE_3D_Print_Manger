@@ -904,7 +904,7 @@ export default {
       modelUrl: 'MakerWorld 链接',
       notes: '备注',
       urlPlaceholder: 'https://makerworld.com.cn/zh/models/...',
-      urlHint: '仅支持 MakerWorld 中国站链接。',
+      urlHint: '仅支持 MakerWorld 中国站链接。（自制模型打印请发送至kkmria@163.com并留下登记信息）',
       submit: '提交登记',
       save: '保存登记',
       badge: '人工登记',
@@ -924,6 +924,12 @@ export default {
       requesterNameValue: '姓名：{{value}}',
       contactEmailValue: '邮箱：{{value}}',
       hiddenValue: '已隐藏',
+    },
+    admin: {
+      unlockTitle: '解锁管理员删除权限',
+      unlockDescription: '输入管理员密码后，才可执行队列删除操作。',
+      unlockPassword: '管理员密码',
+      unlockSubmit: '解锁删除',
     },
     // Empty state
     empty: {
@@ -1010,6 +1016,9 @@ export default {
       contactsUnlocked: '姓名和邮箱已解锁',
       contactsHidden: '姓名和邮箱已重新隐藏',
       unlockContactsFailed: '密码错误，无法查看姓名和邮箱',
+      adminAccessUnlocked: '管理员删除权限已解锁',
+      unlockAdminFailed: '管理员密码错误，无法删除队列项',
+      adminAccessExpired: '管理员密码已失效，请重新输入后再删除',
     },
     // Permissions
     permissions: {
@@ -1020,6 +1029,7 @@ export default {
       noRequeue: '您没有重新排队的权限',
       noRemove: '您没有移除此队列项目的权限',
       noClearHistory: '您没有清除所有历史的权限',
+      noAdminAccess: '需要输入管理员密码后才能删除',
       noEditItems: '您没有编辑队列项目的权限',
       noCancelItems: '您没有取消队列项目的权限',
       noStatusChange: '您没有修改此登记状态的权限',
@@ -1077,7 +1087,7 @@ export default {
     viewQueue: '查看队列',
     submit: '提交到队列',
     previewLabel: '识别到的模型：',
-    notesPlaceholder: '可选填写尺寸、颜色、打印要求或交付备注。',
+    notesPlaceholder: '可选填写尺寸、颜色、打印要求或交付备注。（注：打印使用材料颜色可能与模型颜色不一致）',
     permissionHint: '你没有创建队列登记的权限。',
     toast: {
       clipboardLoaded: '已从剪贴板读取链接',
@@ -4837,6 +4847,46 @@ export default {
       creating: '创建中...',
       spoolCreated: '耗材已创建！准备写入。',
       createFailed: '创建耗材失败',
+    },
+  },
+
+  onboarding: {
+    label: '新手引导',
+    skip: '跳过',
+    autoAdvance: '使用下方按钮逐步继续，右上角可以随时跳过。',
+    previous: '上一步',
+    next: '下一步',
+    finish: '完成',
+    stepCounter: '{{current}} / {{total}}',
+    steps: {
+      printers: {
+        title: '打印机',
+        description: '这里是打印机总览页，先从这里认识设备状态、任务进度和常用操作。',
+      },
+      camera: {
+        title: '查看打印画面',
+        description: '用这个按钮可以打开打印机实时画面，随时观察成型情况，发现异常也更快。',
+      },
+      queue: {
+        title: '队列排队',
+        description: '这里可以给打印任务排队，决定先打哪个、后打哪个，也能把任务先挂起等待处理。',
+      },
+      stats: {
+        title: '统计',
+        description: '这里可以查看打印次数、打印时长、材料消耗和失败情况，方便长期了解设备使用状态。',
+      },
+      inventory: {
+        title: '材料管理',
+        description: '这里用来管理耗材卷料，可以查看库存、剩余重量，以及材料当前装在哪台打印机里。',
+      },
+      modelLibrary: {
+        title: '模型库',
+        description: '如果你还没有模型，可以先来这里搜索公开模型。找到模型后可以把链接提交到队列；如果是你自己的文件，则去文件管理里上传。',
+      },
+      slicer: {
+        title: '切片体验',
+        description: '这里可以打开在线切片工作区，放入模型、调整参数，并体验完整的切片流程。',
+      },
     },
   },
 

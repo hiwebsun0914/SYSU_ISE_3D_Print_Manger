@@ -8,8 +8,10 @@ import io
 import math
 import zipfile
 
+from backend.app.services.archive import ThreeMFParser
 from backend.app.utils.threemf_tools import (
     extract_filament_usage_from_3mf,
+    find_thumbnail_entry_in_3mf,
     get_cumulative_usage_at_layer,
     mm_to_grams,
     parse_gcode_layer_filament_usage,
@@ -357,6 +359,75 @@ class TestExtractFilamentUsageFrom3mf:
         result = extract_filament_usage_from_3mf(file_path)
 
         assert result == []
+
+
+class TestFindThumbnailEntryIn3mf:
+    """Tests thumbnail discovery across different 3MF layouts."""
+
+    def test_prefers_plate_specific_thumbnail(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("Metadata/plate_2.png", b"plate2")
+            zf.writestr("Metadata/thumbnail.png", b"default")
+        buffer.seek(0)
+
+        with zipfile.ZipFile(buffer, "r") as zf:
+            result = find_thumbnail_entry_in_3mf(zf, plate_number=2)
+
+        assert result == "Metadata/plate_2.png"
+
+    def test_falls_back_to_small_or_auxiliary_thumbnail(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("Metadata/plate_3_small.png", b"small")
+            zf.writestr("Auxiliaries/.thumbnails/cover.webp", b"aux")
+        buffer.seek(0)
+
+        with zipfile.ZipFile(buffer, "r") as zf:
+            result = find_thumbnail_entry_in_3mf(zf, plate_number=3)
+
+        assert result == "Metadata/plate_3_small.png"
+
+
+class TestThreeMFParserFallbacks:
+    """Regression tests for parser fallbacks used by archive/library previews."""
+
+    def test_sums_used_grams_when_weight_metadata_is_missing(self, tmp_path):
+        archive_path = tmp_path / "missing-weight.3mf"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr(
+                "Metadata/slice_info.config",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <config>
+                    <plate>
+                        <metadata key="index" value="2" />
+                        <filament id="1" type="PLA" color="#FF0000" used_g="12.5" />
+                        <filament id="2" type="PETG" color="#00FF00" used_g="7.5" />
+                    </plate>
+                </config>
+                """,
+            )
+        archive_path.write_bytes(buffer.getvalue())
+
+        parser = ThreeMFParser(archive_path, plate_number=2)
+        metadata = parser.parse()
+
+        assert metadata["filament_used_grams"] == 20.0
+        assert metadata["filament_type"] == "PLA, PETG"
+
+    def test_uses_small_thumbnail_when_full_plate_image_is_missing(self, tmp_path):
+        archive_path = tmp_path / "small-thumb.3mf"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("Metadata/plate_4_small.png", b"small-thumb")
+        archive_path.write_bytes(buffer.getvalue())
+
+        parser = ThreeMFParser(archive_path, plate_number=4)
+        metadata = parser.parse()
+
+        assert metadata["_thumbnail_data"] == b"small-thumb"
+        assert metadata["_thumbnail_ext"] == ".png"
 
     def test_filament_without_id_is_skipped(self, tmp_path):
         """Test that filament without id is skipped."""

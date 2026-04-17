@@ -251,6 +251,24 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_list_printer_statuses(
+        self, async_client: AsyncClient, printer_factory, mock_printer_manager, db_session
+    ):
+        """Verify batched printer statuses can be retrieved in one request."""
+        printer_a = await printer_factory(name="Alpha Printer")
+        printer_b = await printer_factory(name="Beta Printer")
+
+        response = await async_client.get("/api/v1/printers/statuses")
+
+        assert response.status_code == 200
+        result = response.json()
+        returned_ids = {item["id"] for item in result}
+        assert printer_a.id in returned_ids
+        assert printer_b.id in returned_ids
+        assert all("connected" in item for item in result)
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_printer_status_not_found(self, async_client: AsyncClient):
         """Verify 404 for status of non-existent printer."""
         response = await async_client.get("/api/v1/printers/9999/status")

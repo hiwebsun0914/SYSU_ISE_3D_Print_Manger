@@ -127,9 +127,9 @@ function ArchiveGrid({ archives, t }: { archives: Archive[]; t: TFunction }) {
           to={`/archives?search=${encodeURIComponent(archive.print_name || '')}`}
           className="group relative aspect-square rounded-lg bg-bambu-dark border border-bambu-dark-tertiary overflow-hidden hover:border-bambu-green transition-colors"
         >
-          {archive.thumbnail_path ? (
+          {archive.thumbnail_path || archive.filename.toLowerCase().endsWith('.3mf') ? (
             <img
-              src={api.getArchiveThumbnail(archive.id)}
+              src={api.getArchiveThumbnail(archive.id, archive.thumbnail_path)}
               alt={archive.print_name || 'Print'}
               className="w-full h-full object-cover"
             />

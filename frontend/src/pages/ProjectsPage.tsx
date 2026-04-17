@@ -542,17 +542,11 @@ function ProjectCard({ project, onClick, onEdit, onDelete, hasPermission, t }: P
                   className="relative aspect-square rounded-lg bg-bambu-dark overflow-hidden border border-bambu-dark-tertiary"
                   title={archive.print_name || 'Unknown'}
                 >
-                  {archive.thumbnail_path ? (
-                    <img
-                      src={api.getArchiveThumbnail(archive.id)}
-                      alt={archive.print_name || ''}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-bambu-gray/50">
-                      <Package className="w-6 h-6" />
-                    </div>
-                  )}
+                  <img
+                    src={api.getArchiveThumbnail(archive.id, archive.thumbnail_path)}
+                    alt={archive.print_name || ''}
+                    className="w-full h-full object-cover"
+                  />
                   {archive.status === 'failed' && (
                     <div className="absolute inset-0 bg-red-500/40 flex items-center justify-center">
                       <AlertTriangle className="w-4 h-4 text-white" />

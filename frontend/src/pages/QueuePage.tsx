@@ -63,7 +63,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { PrintModal } from '../components/PrintModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getMakerWorldModelDisplayName, isMakerWorldCnModelUrl } from '../utils/makerWorld';
+import { isMakerWorldCnModelUrl } from '../utils/makerWorld';
 
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -77,8 +77,8 @@ function isValidContactEmail(email: string): boolean {
 }
 
 function getCustomRequestTitle(item: PrintQueueItem, fallbackTitle: string): string {
-  if (!item.request_model_url) return fallbackTitle;
-  return getMakerWorldModelDisplayName(item.request_model_url, fallbackTitle);
+  if (item.request_model_title?.trim()) return item.request_model_title;
+  return fallbackTitle;
 }
 
 function getQueueItemDisplayName(item: PrintQueueItem, fallbackCustomTitle: string): string {
@@ -86,6 +86,14 @@ function getQueueItemDisplayName(item: PrintQueueItem, fallbackCustomTitle: stri
     return getCustomRequestTitle(item, fallbackCustomTitle);
   }
   return item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`;
+}
+
+function isThreemfFilename(filename: string | null | undefined): boolean {
+  return (filename || '').toLowerCase().endsWith('.3mf');
+}
+
+function shouldShowLibraryThumbnail(item: PrintQueueItem): boolean {
+  return Boolean(item.library_file_thumbnail || isThreemfFilename(item.library_file_name));
 }
 
 function StatusBadge({ status, waitingReason, printerState, t }: { status: PrintQueueItem['status']; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
@@ -541,7 +549,7 @@ function SortableQueueItem({
   const isMobileSelectable = isPending && !item.custom_request && !!onToggleSelect;
   const displayName = getQueueItemDisplayName(item, t('queue.request.defaultTitle'));
   const canEdit = canModify('queue', 'update', item.created_by_id);
-  const canDelete = canModify('queue', 'delete', item.created_by_id);
+  const canRequestAdminDelete = hasPermission('queue:read');
   const canEditCustomRequest = canEdit && !item.contact_details_hidden;
   const customStatusValue = item.status === 'printing' || item.status === 'completed' ? item.status : 'pending';
 
@@ -605,22 +613,22 @@ function SortableQueueItem({
         )}
 
         <div className="w-10 h-10 sm:w-14 sm:h-14 flex-shrink-0 bg-bambu-dark rounded-lg overflow-hidden">
-          {item.archive_thumbnail ? (
+          {item.archive_id ? (
             <img
               src={
                 item.plate_id != null
                   ? api.getArchivePlateThumbnail(item.archive_id!, item.plate_id)
-                  : api.getArchiveThumbnail(item.archive_id!)
+                  : api.getArchiveThumbnail(item.archive_id!, item.archive_thumbnail)
               }
               alt=""
               className="w-full h-full object-cover"
             />
-          ) : item.library_file_thumbnail ? (
+          ) : shouldShowLibraryThumbnail(item) ? (
             <img
               src={
                 item.plate_id != null
                   ? api.getLibraryFilePlateThumbnail(item.library_file_id!, item.plate_id)
-                  : api.getLibraryFileThumbnailUrl(item.library_file_id!)
+                  : api.getLibraryFileThumbnailUrl(item.library_file_id!, item.library_file_thumbnail)
               }
               alt=""
               className="w-full h-full object-cover"
@@ -705,13 +713,13 @@ function SortableQueueItem({
                       : (item.printer_name || `${t('common.printer')} #${item.printer_id}`)}
                   </span>
                 </span>
-                {item.print_time_seconds && (
+                {item.print_time_seconds != null && (
                   <span className="flex items-center gap-1 sm:gap-1.5">
                     <Timer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     {formatDuration(item.print_time_seconds)}
                   </span>
                 )}
-                {item.filament_used_grams && (
+                {item.filament_used_grams != null && (
                   <span className="flex items-center gap-1 sm:gap-1.5">
                     <Weight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     {formatWeight(item.filament_used_grams)}
@@ -854,8 +862,8 @@ function SortableQueueItem({
                   variant="ghost"
                   size="sm"
                   onClick={onRemove}
-                  disabled={!canDelete}
-                  title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
+                  disabled={!canRequestAdminDelete}
+                  title={!canRequestAdminDelete ? t('queue.permissions.noAdminAccess') : t('common.remove')}
                   className="p-1.5 sm:p-2"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -903,8 +911,8 @@ function SortableQueueItem({
                       variant="ghost"
                       size="sm"
                       onClick={onCancel}
-                      disabled={!canDelete}
-                      title={!canDelete ? t('queue.permissions.noCancel') : t('common.cancel')}
+                      disabled={!canModify('queue', 'delete', item.created_by_id)}
+                      title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noCancel') : t('common.cancel')}
                       className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
                     >
                       <X className="w-4 h-4" />
@@ -927,8 +935,8 @@ function SortableQueueItem({
                       variant="ghost"
                       size="sm"
                       onClick={onRemove}
-                      disabled={!canDelete}
-                      title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
+                      disabled={!canRequestAdminDelete}
+                      title={!canRequestAdminDelete ? t('queue.permissions.noAdminAccess') : t('common.remove')}
                       className="p-1.5 sm:p-2"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -958,6 +966,14 @@ export function QueuePage() {
   const [contactRevealPassword, setContactRevealPassword] = useState<string | null>(null);
   const [showContactUnlockModal, setShowContactUnlockModal] = useState(false);
   const [contactPasswordInput, setContactPasswordInput] = useState('');
+  const [queueAdminPassword, setQueueAdminPassword] = useState<string | null>(null);
+  const [showQueueAdminUnlockModal, setShowQueueAdminUnlockModal] = useState(false);
+  const [queueAdminPasswordInput, setQueueAdminPasswordInput] = useState('');
+  const [pendingAdminAction, setPendingAdminAction] = useState<
+    | { type: 'remove'; item: PrintQueueItem }
+    | { type: 'clear-history' }
+    | null
+  >(null);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -1011,6 +1027,7 @@ export function QueuePage() {
   });
 
   const timeFormat: TimeFormat = settings?.time_format || 'system';
+  const canUnlockQueueAdmin = hasPermission('queue:read');
 
   const { data: queue, isLoading } = useQuery({
     queryKey: ['queue', filterPrinter, filterStatus, !!contactRevealPassword],
@@ -1079,6 +1096,24 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.unlockContactsFailed'), 'error'),
   });
 
+  const unlockQueueAdminMutation = useMutation({
+    mutationFn: (password: string) => api.validateQueueAdminAccess(password),
+    onSuccess: (_, password) => {
+      setQueueAdminPassword(password);
+      setQueueAdminPasswordInput('');
+      setShowQueueAdminUnlockModal(false);
+      showToast(t('queue.toast.adminAccessUnlocked'));
+
+      if (pendingAdminAction?.type === 'remove') {
+        setConfirmAction({ type: 'remove', item: pendingAdminAction.item });
+      } else if (pendingAdminAction?.type === 'clear-history') {
+        setShowClearHistoryConfirm(true);
+      }
+      setPendingAdminAction(null);
+    },
+    onError: () => showToast(t('queue.toast.unlockAdminFailed'), 'error'),
+  });
+
   const cancelMutation = useMutation({
     mutationFn: (id: number) => api.cancelQueueItem(id),
     onSuccess: () => {
@@ -1089,12 +1124,20 @@ export function QueuePage() {
   });
 
   const removeMutation = useMutation({
-    mutationFn: (id: number) => api.removeFromQueue(id),
+    mutationFn: ({ id, adminPassword }: { id: number; adminPassword: string }) =>
+      api.removeFromQueue(id, adminPassword),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       showToast(t('queue.toast.removed'));
     },
-    onError: () => showToast(t('queue.toast.removeFailed'), 'error'),
+    onError: (error: Error) => {
+      if (error.message.includes('queue admin password')) {
+        setQueueAdminPassword(null);
+        showToast(t('queue.toast.adminAccessExpired'), 'error');
+        return;
+      }
+      showToast(t('queue.toast.removeFailed'), 'error');
+    },
   });
 
   const stopMutation = useMutation({
@@ -1125,11 +1168,14 @@ export function QueuePage() {
 
   const clearHistoryMutation = useMutation({
     mutationFn: async () => {
+      if (!queueAdminPassword) {
+        throw new Error('Queue admin password required');
+      }
       const historyItems = queue?.filter(i =>
         ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)
       ) || [];
       for (const item of historyItems) {
-        await api.removeFromQueue(item.id);
+        await api.removeFromQueue(item.id, queueAdminPassword);
       }
       return historyItems.length;
     },
@@ -1137,7 +1183,14 @@ export function QueuePage() {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       showToast(t('queue.toast.historyCleared', { count }));
     },
-    onError: () => showToast(t('queue.toast.clearHistoryFailed'), 'error'),
+    onError: (error: Error) => {
+      if (error.message.includes('queue admin password')) {
+        setQueueAdminPassword(null);
+        showToast(t('queue.toast.adminAccessExpired'), 'error');
+        return;
+      }
+      showToast(t('queue.toast.clearHistoryFailed'), 'error');
+    },
   });
 
   const bulkUpdateMutation = useMutation({
@@ -1197,6 +1250,39 @@ export function QueuePage() {
     }
     return false;
   }, [filterLocation, printers]);
+
+  const requestQueueAdminUnlock = useCallback(
+    (action: { type: 'remove'; item: PrintQueueItem } | { type: 'clear-history' }) => {
+      if (!canUnlockQueueAdmin) {
+        showToast(t('queue.permissions.noAdminAccess'), 'error');
+        return;
+      }
+
+      if (queueAdminPassword) {
+        if (action.type === 'remove') {
+          setConfirmAction({ type: 'remove', item: action.item });
+        } else {
+          setShowClearHistoryConfirm(true);
+        }
+        return;
+      }
+
+      setPendingAdminAction(action);
+      setShowQueueAdminUnlockModal(true);
+    },
+    [canUnlockQueueAdmin, queueAdminPassword, showToast, t]
+  );
+
+  const requestQueueRemoval = useCallback(
+    (item: PrintQueueItem) => {
+      requestQueueAdminUnlock({ type: 'remove', item });
+    },
+    [requestQueueAdminUnlock]
+  );
+
+  const requestClearHistory = useCallback(() => {
+    requestQueueAdminUnlock({ type: 'clear-history' });
+  }, [requestQueueAdminUnlock]);
 
   const pendingItems = useMemo(() => {
     let items = queue?.filter(i => i.status === 'pending') || [];
@@ -1336,7 +1422,7 @@ export function QueuePage() {
   return (
     <div className="p-4 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div data-onboarding="queue-header" className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             <ListOrdered className="w-7 h-7 text-bambu-green" />
@@ -1495,9 +1581,9 @@ export function QueuePage() {
             className="w-full sm:w-auto"
             variant="secondary"
             size="sm"
-            onClick={() => setShowClearHistoryConfirm(true)}
-            disabled={!hasPermission('queue:delete_all')}
-            title={!hasPermission('queue:delete_all') ? t('queue.permissions.noClearHistory') : undefined}
+            onClick={requestClearHistory}
+            disabled={!canUnlockQueueAdmin}
+            title={!canUnlockQueueAdmin ? t('queue.permissions.noAdminAccess') : undefined}
           >
             <Trash2 className="w-4 h-4" />
             {t('queue.clearHistory')}
@@ -1505,48 +1591,49 @@ export function QueuePage() {
         )}
       </div>
 
-      {isLoading ? (
-        <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
-      ) : queue?.length === 0 ? (
-        <Card className="p-12 text-center border-dashed">
-          <Calendar className="w-16 h-16 text-bambu-gray mx-auto mb-4 opacity-50" />
-          <h3 className="text-xl font-medium text-white mb-2">{t('queue.empty.title')}</h3>
-          <p className="text-bambu-gray max-w-md mx-auto">
-            {t('queue.empty.description')}
-          </p>
-        </Card>
-      ) : (
-        <div className="space-y-6 sm:space-y-8">
-          {/* Active Prints */}
-          {activeItems.length > 0 && (
-            <div>
-              <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-                {t('queue.sections.currentlyPrinting')}
-              </h2>
-              <div className="space-y-2 sm:space-y-3">
-                {activeItems.map((item) => (
-                  <SortableQueueItem
-                    key={item.id}
-                    item={item}
-                    onEdit={() => item.custom_request ? setEditingRequestItem(item) : undefined}
-                    onCancel={() => {}}
-                    onRemove={() => setConfirmAction({ type: 'remove', item })}
-                    onStop={() => setConfirmAction({ type: 'stop', item })}
-                    onRequeue={() => {}}
-                    onStart={() => {}}
-                    onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
-                    timeFormat={timeFormat}
-                    isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
-                    hasPermission={hasPermission}
-                    canModify={canModify}
-                    printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
-                    t={t}
-                  />
-                ))}
+      <div data-onboarding="queue-content">
+        {isLoading ? (
+          <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
+        ) : queue?.length === 0 ? (
+          <Card className="p-12 text-center border-dashed">
+            <Calendar className="w-16 h-16 text-bambu-gray mx-auto mb-4 opacity-50" />
+            <h3 className="text-xl font-medium text-white mb-2">{t('queue.empty.title')}</h3>
+            <p className="text-bambu-gray max-w-md mx-auto">
+              {t('queue.empty.description')}
+            </p>
+          </Card>
+        ) : (
+          <div className="space-y-6 sm:space-y-8">
+            {/* Active Prints */}
+            {activeItems.length > 0 && (
+              <div>
+                <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                  {t('queue.sections.currentlyPrinting')}
+                </h2>
+                <div className="space-y-2 sm:space-y-3">
+                  {activeItems.map((item) => (
+                    <SortableQueueItem
+                      key={item.id}
+                      item={item}
+                      onEdit={() => item.custom_request ? setEditingRequestItem(item) : undefined}
+                      onCancel={() => {}}
+                      onRemove={() => requestQueueRemoval(item)}
+                      onStop={() => setConfirmAction({ type: 'stop', item })}
+                      onRequeue={() => {}}
+                      onStart={() => {}}
+                      onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
+                      timeFormat={timeFormat}
+                      isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
+                      hasPermission={hasPermission}
+                      canModify={canModify}
+                      printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
+                      t={t}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Pending Queue */}
           {pendingItems.length > 0 && (
@@ -1649,7 +1736,7 @@ export function QueuePage() {
                         position={index + 1}
                         onEdit={() => item.custom_request ? setEditingRequestItem(item) : setEditItem(item)}
                         onCancel={() => setConfirmAction({ type: 'cancel', item })}
-                        onRemove={() => setConfirmAction({ type: 'remove', item })}
+                        onRemove={() => requestQueueRemoval(item)}
                         onStop={() => {}}
                         onRequeue={() => {}}
                         onStart={() => startMutation.mutate(item.id)}
@@ -1709,7 +1796,7 @@ export function QueuePage() {
                     position={index + 1}
                     onEdit={() => item.custom_request ? setEditingRequestItem(item) : undefined}
                     onCancel={() => {}}
-                    onRemove={() => setConfirmAction({ type: 'remove', item })}
+                    onRemove={() => requestQueueRemoval(item)}
                     onStop={() => {}}
                     onRequeue={() => setRequeueItem(item)}
                     onStart={() => {}}
@@ -1724,8 +1811,9 @@ export function QueuePage() {
               </div>
             </div>
           )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {(showRequestModal || editingRequestItem) && (
         <QueueRequestModal
@@ -1804,6 +1892,66 @@ export function QueuePage() {
         </div>
       )}
 
+      {showQueueAdminUnlockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-bambu-dark-secondary rounded-xl border border-bambu-dark-tertiary w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
+              <h2 className="text-lg font-semibold text-white">{t('queue.admin.unlockTitle')}</h2>
+              <button
+                onClick={() => {
+                  if (!unlockQueueAdminMutation.isPending) {
+                    setShowQueueAdminUnlockModal(false);
+                    setQueueAdminPasswordInput('');
+                    setPendingAdminAction(null);
+                  }
+                }}
+                className="p-1 hover:bg-bambu-dark rounded"
+              >
+                <X className="w-5 h-5 text-bambu-gray" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-bambu-gray">{t('queue.admin.unlockDescription')}</p>
+              <div>
+                <label className="block text-sm font-medium text-white mb-2">{t('queue.admin.unlockPassword')}</label>
+                <input
+                  type="password"
+                  value={queueAdminPasswordInput}
+                  onChange={(e) => setQueueAdminPasswordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && queueAdminPasswordInput.trim()) {
+                      unlockQueueAdminMutation.mutate(queueAdminPasswordInput.trim());
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t border-bambu-dark-tertiary">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowQueueAdminUnlockModal(false);
+                  setQueueAdminPasswordInput('');
+                  setPendingAdminAction(null);
+                }}
+                disabled={unlockQueueAdminMutation.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={() => unlockQueueAdminMutation.mutate(queueAdminPasswordInput.trim())}
+                disabled={unlockQueueAdminMutation.isPending || !queueAdminPasswordInput.trim()}
+              >
+                {unlockQueueAdminMutation.isPending ? t('common.saving') : t('queue.admin.unlockSubmit')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {editItem && (
         <PrintModal
@@ -1854,7 +2002,12 @@ export function QueuePage() {
             } else if (confirmAction.type === 'stop') {
               stopMutation.mutate(confirmAction.item.id);
             } else {
-              removeMutation.mutate(confirmAction.item.id);
+              if (!queueAdminPassword) {
+                setPendingAdminAction({ type: 'remove', item: confirmAction.item });
+                setShowQueueAdminUnlockModal(true);
+              } else {
+                removeMutation.mutate({ id: confirmAction.item.id, adminPassword: queueAdminPassword });
+              }
             }
             setConfirmAction(null);
           }}

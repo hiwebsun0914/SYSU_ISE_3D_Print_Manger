@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Clock, Calendar, ChevronRight, Loader2, CircleCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api } from '../api/client';
+import { api, type PrintQueueItem } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { formatRelativeTime } from '../utils/date';
@@ -13,20 +13,32 @@ interface PrinterQueueWidgetProps {
   printerModel?: string | null;
   printerState?: string | null;
   plateCleared?: boolean;
+  queueItems?: PrintQueueItem[];
   loadedFilamentTypes?: Set<string>;
   loadedFilaments?: Set<string>;  // "TYPE:rrggbb" pairs for filament override color matching
 }
 
-export function PrinterQueueWidget({ printerId, printerModel, printerState, plateCleared, loadedFilamentTypes, loadedFilaments }: PrinterQueueWidgetProps) {
+export function PrinterQueueWidget({
+  printerId,
+  printerModel,
+  printerState,
+  plateCleared,
+  queueItems,
+  loadedFilamentTypes,
+  loadedFilaments,
+}: PrinterQueueWidgetProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission } = useAuth();
-  const { data: queue } = useQuery({
+  const sharedQueueProvided = queueItems !== undefined;
+  const { data: fetchedQueue } = useQuery({
     queryKey: ['queue', printerId, 'pending', printerModel],
     queryFn: () => api.getQueue(printerId, 'pending', printerModel || undefined),
+    enabled: !sharedQueueProvided,
     refetchInterval: 30000,
   });
+  const queue = sharedQueueProvided ? queueItems : fetchedQueue;
 
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printerId),

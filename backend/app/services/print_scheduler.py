@@ -1438,8 +1438,8 @@ class PrintScheduler:
     async def _get_job_name(self, db: AsyncSession, item: PrintQueueItem) -> str:
         """Get a human-readable name for a queue item."""
         if item.custom_request:
-            if item.request_model_url:
-                return item.request_model_url
+            if getattr(item, "request_model_title", None):
+                return item.request_model_title
             if item.requester_name:
                 return f"Custom request - {item.requester_name}"
             return f"Custom request #{item.id}"

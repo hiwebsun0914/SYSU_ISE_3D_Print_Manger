@@ -281,7 +281,7 @@ build_frontend() {
 }
 
 extract_main_asset() {
-  sed -n 's#.*src="/assets/\([^"]*\.js\)".*#\1#p' "${STATIC_DIR}/index.html" | head -n 1
+  sed -nE 's#.*src="([^"]*/)?assets/([^"]*\.js)".*#\2#p' "${STATIC_DIR}/index.html" | head -n 1
 }
 
 git_head() {
@@ -342,7 +342,7 @@ deploy_edge_static() {
 
   if [[ -n "${DEPLOY_DOMAIN}" ]]; then
     log "verifying deployed homepage and health endpoint"
-    curl -fsSk "https://${DEPLOY_DOMAIN}/" | grep -q "/assets/${main_asset}" \
+    curl -fsSk "https://${DEPLOY_DOMAIN}/" | grep -q "${main_asset}" \
       || die "homepage does not reference expected asset: ${main_asset}"
     curl -fsSk "https://${DEPLOY_DOMAIN}/health" >/dev/null \
       || die "health endpoint check failed"

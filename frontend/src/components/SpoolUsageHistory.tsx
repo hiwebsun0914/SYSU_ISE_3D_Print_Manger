@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Trash2, Clock } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { SpoolUsageRecord } from '../api/client';
 import { Button } from './Button';
@@ -80,9 +81,19 @@ export function SpoolUsageHistory({ spoolId }: SpoolUsageHistoryProps) {
             <div className="flex-1 min-w-0">
               <span className="text-bambu-gray">{formatDate(record.created_at)}</span>
               {record.print_name && (
-                <span className="text-white ml-2 truncate" title={record.print_name}>
-                  {record.print_name}
-                </span>
+                record.archive_id ? (
+                  <Link
+                    to={`/archives?highlight=${record.archive_id}`}
+                    className="text-white ml-2 truncate hover:text-bambu-green"
+                    title={record.print_name}
+                  >
+                    {record.print_name}
+                  </Link>
+                ) : (
+                  <span className="text-white ml-2 truncate" title={record.print_name}>
+                    {record.print_name}
+                  </span>
+                )
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0 ml-2">

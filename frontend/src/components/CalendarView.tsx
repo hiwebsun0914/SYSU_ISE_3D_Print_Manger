@@ -241,9 +241,9 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
                     }`}
                     style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '2px' } : undefined}
                   >
-                    {archive.thumbnail_path ? (
+                    {archive.thumbnail_path || archive.filename.toLowerCase().endsWith('.3mf') ? (
                       <img
-                        src={api.getArchiveThumbnail(archive.id)}
+                        src={api.getArchiveThumbnail(archive.id, archive.thumbnail_path)}
                         alt=""
                         className="w-12 h-12 rounded object-cover"
                       />

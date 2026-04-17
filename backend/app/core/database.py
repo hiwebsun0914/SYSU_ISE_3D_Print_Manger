@@ -1404,6 +1404,10 @@ async def run_migrations(conn):
     except OperationalError:
         pass  # Already applied
     try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN request_model_title VARCHAR(255)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
         await conn.execute(text("ALTER TABLE print_queue ADD COLUMN request_notes TEXT"))
     except OperationalError:
         pass  # Already applied

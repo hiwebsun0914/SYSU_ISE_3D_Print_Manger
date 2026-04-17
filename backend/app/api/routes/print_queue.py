@@ -1,5 +1,6 @@
 """API routes for print queue management."""
 
+import asyncio
 import json
 import logging
 import re
@@ -14,7 +15,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission
+from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_auth_if_enabled, require_ownership_permission
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
@@ -34,6 +35,7 @@ from backend.app.schemas.print_queue import (
     QueueContactAccessRequest,
     QueueContactAccessResponse,
 )
+from backend.app.services.makerworld_titles import is_exact_makerworld_slug_title, resolve_makerworld_model_title
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 QUEUE_CONTACT_PASSWORD_HEADER = "X-Queue-Contact-Password"
+QUEUE_ADMIN_PASSWORD_HEADER = "X-Queue-Admin-Password"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -64,6 +67,16 @@ def _contact_details_visible(request: Request) -> bool:
     if secrets.compare_digest(password, settings.queue_contact_view_password):
         return True
     raise HTTPException(403, "Invalid contact details password")
+
+
+def _queue_admin_access_granted(request: Request) -> bool:
+    """Whether the request includes the shared queue admin password."""
+    password = request.headers.get(QUEUE_ADMIN_PASSWORD_HEADER)
+    if password is None:
+        raise HTTPException(403, "Queue admin password required")
+    if secrets.compare_digest(password, settings.queue_admin_action_password):
+        return True
+    raise HTTPException(403, "Invalid queue admin password")
 
 
 async def _get_next_pending_position(db: AsyncSession, printer_id: int | None) -> int:
@@ -243,6 +256,7 @@ def _enrich_response(item: PrintQueueItem, reveal_contact_details: bool = False)
         "contact_email": None if contact_details_hidden else item.contact_email,
         "contact_details_hidden": contact_details_hidden,
         "request_model_url": item.request_model_url,
+        "request_model_title": item.request_model_title,
         "request_notes": item.request_notes,
         "position": item.position,
         "scheduled_time": item.scheduled_time,
@@ -319,6 +333,43 @@ def _enrich_response(item: PrintQueueItem, reveal_contact_details: bool = False)
     return response
 
 
+async def _populate_missing_request_model_titles(items: list[PrintQueueItem], db: AsyncSession) -> None:
+    """Resolve and persist readable titles for manual MakerWorld requests."""
+    pending_items = [
+        item
+        for item in items
+        if item.custom_request
+        and item.request_model_url
+        and (
+            not item.request_model_title
+            or is_exact_makerworld_slug_title(item.request_model_title, item.request_model_url)
+        )
+    ]
+    if not pending_items:
+        return
+
+    titles = await asyncio.gather(
+        *(resolve_makerworld_model_title(item.request_model_url) for item in pending_items),
+        return_exceptions=True,
+    )
+
+    updated = False
+    for item, resolved_title in zip(pending_items, titles):
+        if isinstance(resolved_title, Exception):
+            logger.warning("Failed to resolve MakerWorld title for queue item %s: %s", item.id, resolved_title)
+            continue
+        if not resolved_title and is_exact_makerworld_slug_title(item.request_model_title, item.request_model_url):
+            item.request_model_title = None
+            updated = True
+            continue
+        if resolved_title and resolved_title != item.request_model_title:
+            item.request_model_title = resolved_title
+            updated = True
+
+    if updated:
+        await db.commit()
+
+
 @router.get("/", response_model=list[PrintQueueItemResponse])
 async def list_queue(
     request: Request,
@@ -378,6 +429,7 @@ async def list_queue(
 
     result = await db.execute(query)
     items = result.scalars().all()
+    await _populate_missing_request_model_titles(items, db)
     return [_enrich_response(item, reveal_contact_details=reveal_contact_details) for item in items]
 
 
@@ -487,6 +539,7 @@ async def add_to_queue(
         requester_name=data.requester_name.strip() if data.requester_name else None,
         contact_email=data.contact_email.strip() if data.contact_email else None,
         request_model_url=data.request_model_url.strip() if data.request_model_url else None,
+        request_model_title=None,
         request_notes=data.request_notes.strip() if data.request_notes else None,
         scheduled_time=data.scheduled_time,
         require_previous_success=data.require_previous_success,
@@ -504,6 +557,8 @@ async def add_to_queue(
         status="pending",
         created_by_id=current_user.id if current_user else None,
     )
+    if item.custom_request and item.request_model_url:
+        item.request_model_title = await resolve_makerworld_model_title(item.request_model_url)
     db.add(item)
     await db.commit()
     await db.refresh(item)
@@ -644,6 +699,7 @@ async def get_queue_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
+    await _populate_missing_request_model_titles([item], db)
     return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
 
 
@@ -742,6 +798,8 @@ async def update_queue_item(
         update_data["contact_email"] = update_data["contact_email"].strip()
     if "request_model_url" in update_data and update_data["request_model_url"] is not None:
         update_data["request_model_url"] = update_data["request_model_url"].strip()
+        if item.custom_request and update_data["request_model_url"]:
+            update_data["request_model_title"] = await resolve_makerworld_model_title(update_data["request_model_url"])
     if "request_notes" in update_data and update_data["request_notes"] is not None:
         update_data["request_notes"] = update_data["request_notes"].strip()
     if item.custom_request:
@@ -823,29 +881,31 @@ async def validate_queue_contact_access(
     return QueueContactAccessResponse(success=True)
 
 
+@router.post("/admin-access", response_model=QueueContactAccessResponse)
+async def validate_queue_admin_access(
+    data: QueueContactAccessRequest,
+    _: User | None = Depends(require_auth_if_enabled),
+):
+    """Validate the shared password used for queue-admin actions."""
+    if not secrets.compare_digest(data.password, settings.queue_admin_action_password):
+        raise HTTPException(403, "Invalid queue admin password")
+    return QueueContactAccessResponse(success=True)
+
+
 @router.delete("/{item_id}")
 async def delete_queue_item(
     item_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.QUEUE_DELETE_ALL,
-            Permission.QUEUE_DELETE_OWN,
-        )
-    ),
+    _: User | None = Depends(require_auth_if_enabled),
 ):
     """Remove an item from the queue."""
-    user, can_modify_all = auth_result
+    _queue_admin_access_granted(request)
 
     result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
-
-    # Ownership check
-    if not can_modify_all:
-        if item.created_by_id != user.id:
-            raise HTTPException(403, "You can only delete your own queue items")
 
     if item.status == "printing" and not item.custom_request:
         raise HTTPException(400, "Cannot delete item that is currently printing")

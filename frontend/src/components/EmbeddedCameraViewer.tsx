@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { X, RefreshCw, AlertTriangle, Maximize2, Minimize2, GripVertical, WifiOff, ZoomIn, ZoomOut, Fullscreen, Minimize } from 'lucide-react';
-import { api, getOnDemandPrinterLiveFrameUrl } from '../api/client';
+import { api } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ChamberLight } from './icons/ChamberLight';
@@ -20,8 +20,6 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 2000;
 const MAX_RECONNECT_DELAY = 30000;
 const STALL_CHECK_INTERVAL = 5000;
-const PUBLIC_LIVE_FRAME_REFRESH_INTERVAL = 500;
-
 interface CameraState {
   x: number;
   y: number;
@@ -99,9 +97,6 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
-  const liveFrameUrl = getOnDemandPrinterLiveFrameUrl(printerId, imageKey);
-  const usesPublicLiveFrames = true;
-
   // Fetch printer info
   const { data: printer } = useQuery({
     queryKey: ['printer', printerId],
@@ -214,7 +209,7 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
 
   // Stall detection
   useEffect(() => {
-    if (usesPublicLiveFrames || streamLoading || isReconnecting || isMinimized) {
+    if (streamLoading || isReconnecting || isMinimized) {
       if (stallCheckIntervalRef.current) {
         clearInterval(stallCheckIntervalRef.current);
         stallCheckIntervalRef.current = null;
@@ -244,19 +239,7 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
         stallCheckIntervalRef.current = null;
       }
     };
-  }, [usesPublicLiveFrames, streamLoading, streamError, isReconnecting, isMinimized, printerId, attemptReconnect]);
-
-  useEffect(() => {
-    if (!usesPublicLiveFrames || isMinimized || isReconnecting) {
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      setImageKey(Date.now());
-    }, PUBLIC_LIVE_FRAME_REFRESH_INTERVAL);
-
-    return () => clearInterval(intervalId);
-  }, [usesPublicLiveFrames, isMinimized, isReconnecting]);
+  }, [streamLoading, streamError, isReconnecting, isMinimized, printerId, attemptReconnect]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -459,6 +442,8 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     setTimeout(() => setImageKey(Date.now()), 100);
   };
 
+  const streamUrl = `${api.getCameraStreamUrl(printerId, 15)}&t=${imageKey}`;
+
   // Drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.no-drag')) return;
@@ -548,8 +533,6 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
       };
     }
   }, [isDragging, isResizing, dragOffset]);
-
-  const streamUrl = liveFrameUrl;
 
   return (
     <div
@@ -680,7 +663,7 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
           )}
           <img
             ref={imgRef}
-            key={usesPublicLiveFrames ? `printer-${printerId}-public-live` : String(imageKey)}
+            key={String(imageKey)}
             src={streamUrl}
             alt="Camera stream"
             className="max-w-full max-h-full object-contain select-none"

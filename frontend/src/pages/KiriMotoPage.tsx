@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getAuthToken, type AppSettings, type LibraryFile } from '../api/client';
 import { Button } from '../components/Button';
+import { clearPrewarmedKiriIframe, getKiriOrigin, KIRI_IFRAME_SANDBOX, loadKiriBridge } from '../utils/kiriMotoBridge';
 import { resolveOnlineSlicerUrlTemplate } from '../utils/onlineSlicer';
 
 declare global {
@@ -29,45 +30,6 @@ interface KiriFrameApi {
   clear: () => void;
   parse: (data: ArrayBuffer | string, type: 'stl' | 'svg') => void;
   setMode: (mode: 'FDM' | 'CAM' | 'LASER' | 'SLA') => void;
-}
-
-let kiriBridgePromise: Promise<void> | null = null;
-
-function loadKiriBridge(scriptUrl: string): Promise<void> {
-  if (window.kiri?.frame) {
-    return Promise.resolve();
-  }
-
-  if (kiriBridgePromise) {
-    return kiriBridgePromise;
-  }
-
-  kiriBridgePromise = new Promise<void>((resolve, reject) => {
-    const existingScript = document.querySelector<HTMLScriptElement>('script[data-kiri-bridge="true"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', () => resolve(), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Failed to load Kiri:Moto bridge')), { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = scriptUrl;
-    script.async = true;
-    script.dataset.kiriBridge = 'true';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Kiri:Moto bridge'));
-    document.head.appendChild(script);
-  });
-
-  return kiriBridgePromise;
-}
-
-function getKiriOrigin(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return 'https://grid.space';
-  }
 }
 
 function isStlFile(fileType: string | undefined, filename: string): boolean {
@@ -153,6 +115,7 @@ export function KiriMotoPage() {
       return;
     }
 
+    clearPrewarmedKiriIframe(activeLaunchUrl);
     setStatusMessage(t('kiriMoto.status.loadingBridge'));
 
     loadKiriBridge(kiriBridgeUrl)
@@ -275,7 +238,7 @@ export function KiriMotoPage() {
     >
       <div className="border-b border-bambu-dark-tertiary bg-bambu-dark-secondary/95 px-4 py-3 backdrop-blur md:px-6">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
+          <div data-onboarding="kiri-heading" className="min-w-0">
             <div className="flex items-center gap-2 text-white">
               <Layers className="w-5 h-5 text-bambu-green" />
               <h1 className="text-xl font-semibold">{t('settings.slicerOrcaSlicer')}</h1>
@@ -315,7 +278,7 @@ export function KiriMotoPage() {
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-0 bg-black">
+      <div data-onboarding="kiri-workspace" className="relative flex-1 min-h-0 bg-black">
         {unavailable && (
           <div className="flex h-full flex-col items-center justify-center gap-4 bg-bambu-dark px-4 text-center text-bambu-gray">
             <AlertTriangle className="w-12 h-12 text-yellow-400" />
@@ -356,7 +319,7 @@ export function KiriMotoPage() {
             src={activeLaunchUrl}
             title={t('settings.slicerOrcaSlicer')}
             className="h-full w-full border-0 bg-black"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+            sandbox={KIRI_IFRAME_SANDBOX}
           />
         )}
       </div>

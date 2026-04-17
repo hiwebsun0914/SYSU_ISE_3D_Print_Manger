@@ -128,12 +128,12 @@ describe('CameraPage', () => {
       });
     });
 
-    it('uses the on-demand live frame endpoint for live mode', async () => {
+    it('uses the MJPG stream endpoint for live mode', async () => {
       renderCameraPage(1);
 
       await waitFor(() => {
         const img = screen.getByAltText(/Camera stream|camera\.cameraStream/) as HTMLImageElement;
-        expect(img.src).toContain('/api/v1/printers/1/camera/public-live-frame');
+        expect(img.src).toContain('/api/v1/printers/1/camera/stream?fps=15');
       });
     });
   });

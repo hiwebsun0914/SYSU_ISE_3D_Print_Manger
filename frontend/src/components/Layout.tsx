@@ -451,6 +451,7 @@ export function Layout() {
                   >
                     <NavLink
                       to={to}
+                      data-onboarding-nav={id}
                       className={({ isActive }) =>
                         `flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group ${
                           isActive

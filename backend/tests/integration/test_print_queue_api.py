@@ -3,6 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
+from backend.app.core.config import settings
+
 
 class TestPrintQueueAPI:
     """Integration tests for /api/v1/queue endpoints."""
@@ -284,7 +286,10 @@ class TestPrintQueueAPI:
     async def test_delete_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify queue item can be deleted."""
         item = await queue_item_factory()
-        response = await async_client.delete(f"/api/v1/queue/{item.id}")
+        response = await async_client.delete(
+            f"/api/v1/queue/{item.id}",
+            headers={"X-Queue-Admin-Password": settings.queue_admin_action_password},
+        )
         assert response.status_code == 200
         assert response.json()["message"] == "Queue item deleted"
 
@@ -292,8 +297,79 @@ class TestPrintQueueAPI:
     @pytest.mark.integration
     async def test_delete_queue_item_not_found(self, async_client: AsyncClient):
         """Verify 404 for deleting non-existent queue item."""
-        response = await async_client.delete("/api/v1/queue/9999")
+        response = await async_client.delete(
+            "/api/v1/queue/9999",
+            headers={"X-Queue-Admin-Password": settings.queue_admin_action_password},
+        )
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_delete_queue_item_requires_admin_password(self, async_client: AsyncClient, queue_item_factory):
+        """Verify queue deletion is protected by the shared admin password."""
+        item = await queue_item_factory()
+        response = await async_client.delete(f"/api/v1/queue/{item.id}")
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Queue admin password required"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_add_custom_request_does_not_persist_slug_fallback(
+        self, async_client: AsyncClient, monkeypatch, db_session
+    ):
+        """Verify unresolved custom requests stay dynamic instead of storing slug text."""
+
+        async def _mock_resolve(_: str) -> None:
+            return None
+
+        monkeypatch.setattr("backend.app.api.routes.print_queue.resolve_makerworld_model_title", _mock_resolve)
+
+        data = {
+            "custom_request": True,
+            "student_id": "22330001",
+            "requester_name": "Test Student",
+            "contact_email": "student@example.com",
+            "request_model_url": "https://makerworld.com.cn/zh/models/658549-bi-ji-ben-dian-nao-zhi-jia-laptop-stand",
+            "request_notes": "Please print this one",
+        }
+        response = await async_client.post("/api/v1/queue/", json=data)
+
+        assert response.status_code == 200
+        assert response.json()["request_model_title"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_list_queue_refreshes_legacy_slug_title(self, async_client: AsyncClient, monkeypatch, db_session):
+        """Verify legacy slug-only titles are re-resolved during queue reads."""
+        from backend.app.models.print_queue import PrintQueueItem
+
+        async def _mock_resolve(_: str) -> str:
+            return "笔记本电脑支架 Laptop Stand"
+
+        monkeypatch.setattr("backend.app.api.routes.print_queue.resolve_makerworld_model_title", _mock_resolve)
+
+        item = PrintQueueItem(
+            custom_request=True,
+            student_id="22330002",
+            requester_name="Legacy Student",
+            contact_email="legacy@example.com",
+            request_model_url="https://makerworld.com.cn/zh/models/658549-bi-ji-ben-dian-nao-zhi-jia-laptop-stand",
+            request_model_title="bi ji ben dian nao zhi jia laptop stand",
+            request_notes="legacy item",
+            position=1,
+            status="pending",
+        )
+        db_session.add(item)
+        await db_session.commit()
+
+        response = await async_client.get("/api/v1/queue/")
+
+        assert response.status_code == 200
+        items = response.json()
+        assert items[0]["request_model_title"] == "笔记本电脑支架 Laptop Stand"
+
+        await db_session.refresh(item)
+        assert item.request_model_title == "笔记本电脑支架 Laptop Stand"
 
 
 class TestQueueStartEndpoint:

@@ -683,12 +683,12 @@ function ArchiveCard({
         onMouseEnter={() => setShowPlateNav(true)}
         onMouseLeave={() => setShowPlateNav(false)}
       >
-        {archive.thumbnail_path ? (
+        {archive.thumbnail_path || archive.filename.toLowerCase().endsWith('.3mf') ? (
           <img
             src={
               currentPlateIndex !== null && plates.length > 0
                 ? api.getArchivePlateThumbnail(archive.id, plates[displayPlateIndex]?.index ?? 0)
-                : api.getArchiveThumbnail(archive.id)
+                : api.getArchiveThumbnail(archive.id, archive.thumbnail_path)
             }
             alt={archive.print_name || archive.filename}
             className="w-full h-full object-cover"
@@ -989,7 +989,7 @@ function ArchiveCard({
               )}
             </div>
           )}
-          {archive.filament_used_grams && (
+          {archive.filament_used_grams != null && (
             <div className="flex items-center gap-1.5 text-bambu-gray">
               <Package className="w-3 h-3" />
               {archive.filament_used_grams.toFixed(1)}g
@@ -1291,7 +1291,7 @@ function ArchiveCard({
       {/* Timelapse Viewer Modal */}
       {showTimelapse && archive.timelapse_path && (
         <TimelapseViewer
-          src={api.getArchiveTimelapse(archive.id)}
+          src={api.getArchiveTimelapse(archive.id, archive.timelapse_path)}
           title={t('archives.modal.timelapse', { name: archive.print_name || archive.filename })}
           downloadFilename={`${archive.print_name || archive.filename}_timelapse.mp4`}
           archiveId={archive.id}
@@ -1918,9 +1918,9 @@ function ArchiveListRow({
               )}
             </button>
           )}
-          {archive.thumbnail_path ? (
+          {archive.thumbnail_path || archive.filename.toLowerCase().endsWith('.3mf') ? (
             <img
-              src={api.getArchiveThumbnail(archive.id)}
+              src={api.getArchiveThumbnail(archive.id, archive.thumbnail_path)}
               alt=""
               className="w-10 h-10 object-cover rounded"
             />
@@ -2199,7 +2199,7 @@ function ArchiveListRow({
       {/* Timelapse Viewer Modal */}
       {showTimelapse && archive.timelapse_path && (
         <TimelapseViewer
-          src={api.getArchiveTimelapse(archive.id)}
+          src={api.getArchiveTimelapse(archive.id, archive.timelapse_path)}
           title={t('archives.modal.timelapse', { name: archive.print_name || archive.filename })}
           downloadFilename={`${archive.print_name || archive.filename}_timelapse.mp4`}
           archiveId={archive.id}

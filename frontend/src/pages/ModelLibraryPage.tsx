@@ -139,7 +139,7 @@ export function ModelLibraryPage() {
   return (
     <div className="p-4 md:p-8 space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
+        <div data-onboarding="model-library-heading">
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             <BookOpen className="w-7 h-7 text-bambu-green" />
             {t('modelLibrary.title')}
@@ -179,7 +179,7 @@ export function ModelLibraryPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div>
+            <div data-onboarding="model-library-search">
               <label className="block text-sm font-medium text-white mb-2">{t('modelLibrary.searchLabel')}</label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input

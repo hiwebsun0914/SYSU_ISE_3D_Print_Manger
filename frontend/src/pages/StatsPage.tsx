@@ -1036,14 +1036,6 @@ export function StatsPage() {
   const printerMap = new Map(printers?.map((p) => [String(p.id), p.name]) || []);
   const printDates = useMemo(() => archives?.map((a) => a.created_at) || [], [archives]);
 
-  if (isLoading) {
-    return (
-      <div className="p-4 md:p-8">
-        <div className="text-center py-12 text-bambu-gray">{t('stats.loadingStats')}</div>
-      </div>
-    );
-  }
-
   // Define dashboard widgets
   // Sizes: 1 = quarter (1/4), 2 = half (1/2), 4 = full width
   // Widgets can use render functions to receive the current size for responsive content
@@ -1101,7 +1093,7 @@ export function StatsPage() {
   return (
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
+        <div data-onboarding="stats-header">
           <h1 className="text-2xl font-bold text-white">{t('stats.title')}</h1>
           <p className="text-bambu-gray">{t('stats.subtitle')}</p>
         </div>
@@ -1267,13 +1259,19 @@ export function StatsPage() {
         </div>
       </div>
 
-      <Dashboard
-        key={dashboardKey}
-        widgets={widgets}
-        storageKey="bambusy-dashboard-layout-v2"
-        stackBelow={640}
-        hideControls
-      />
+      <div data-onboarding="stats-dashboard">
+        {isLoading ? (
+          <div className="text-center py-12 text-bambu-gray">{t('stats.loadingStats')}</div>
+        ) : (
+          <Dashboard
+            key={dashboardKey}
+            widgets={widgets}
+            storageKey="bambusy-dashboard-layout-v2"
+            stackBelow={640}
+            hideControls
+          />
+        )}
+      </div>
     </div>
   );
 }

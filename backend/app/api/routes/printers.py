@@ -46,304 +46,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
 
 
-@router.get("/", response_model=list[PrinterResponse])
-async def list_printers(
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-    db: AsyncSession = Depends(get_db),
-):
-    """List all configured printers."""
-    result = await db.execute(select(Printer).order_by(Printer.name))
-    return list(result.scalars().all())
-
-
-@router.post("/", response_model=PrinterResponse)
-async def create_printer(
-    printer_data: PrinterCreate,
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CREATE),
-    db: AsyncSession = Depends(get_db),
-):
-    """Add a new printer."""
-    # Check if serial number already exists
-    result = await db.execute(select(Printer).where(Printer.serial_number == printer_data.serial_number))
-    if result.scalar_one_or_none():
-        raise HTTPException(400, "Printer with this serial number already exists")
-
-    printer = Printer(**printer_data.model_dump())
-    db.add(printer)
-    await db.commit()
-    await db.refresh(printer)
-
-    # Connect to the printer
-    if printer.is_active:
-        await printer_manager.connect_printer(printer)
-
-    return printer
-
-
-@router.get("/usb-cameras")
-async def list_usb_cameras(
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-):
-    """List available USB cameras connected to the system.
-
-    Returns a list of detected V4L2 video devices with their info.
-    Only works on Linux systems with V4L2 support.
-
-    Returns:
-        List of dicts with {device: str, name: str, capabilities: list, formats?: list}
-    """
-    from backend.app.services.external_camera import list_usb_cameras
-
-    cameras = list_usb_cameras()
-    return {"cameras": cameras}
-
-
-@router.get("/available-filaments")
-async def get_available_filaments(
-    model: str = Query(..., description="Target printer model"),
-    location: str | None = Query(None, description="Optional location filter"),
-    _=RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get deduplicated list of filaments loaded across all active printers of a given model.
-
-    Used by the frontend to offer filament override options for model-based queue assignment.
-    """
-    from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
-
-    # Normalize model name
-    normalized_model = normalize_printer_model(model) or normalize_printer_model_id(model) or model
-
-    query = (
-        select(Printer).where(func.lower(Printer.model) == normalized_model.lower()).where(Printer.is_active == True)  # noqa: E712
-    )
-    if location:
-        query = query.where(Printer.location == location)
-
-    result = await db.execute(query)
-    printers_list = list(result.scalars().all())
-
-    if not printers_list:
-        return []
-
-    # Collect filaments from all matching printers
-    # Dedup key includes extruder_id and tray_sub_brands so "PLA Basic" and "PLA Matte" appear separately
-    seen: set[tuple[str, str, str, int | None]] = set()  # (type_upper, color_normalized, sub_brands_upper, extruder_id)
-    filaments = []
-
-    for printer in printers_list:
-        status = printer_manager.get_status(printer.id)
-        if not status:
-            continue
-
-        # Get ams_extruder_map for dual-nozzle printers
-        ams_extruder_map = status.raw_data.get("ams_extruder_map", {})
-
-        # AMS trays
-        for ams_unit in status.raw_data.get("ams", []):
-            ams_id = str(ams_unit.get("id", 0))
-            extruder_id = ams_extruder_map.get(ams_id)
-            for tray in ams_unit.get("tray", []):
-                tray_type = tray.get("tray_type")
-                if not tray_type:
-                    continue
-                tray_color = tray.get("tray_color", "")
-                # Normalize color: remove alpha, add hash
-                hex_color = tray_color.replace("#", "")[:6] if tray_color else "808080"
-                color = f"#{hex_color}"
-                tray_info_idx = tray.get("tray_info_idx", "")
-                tray_sub_brands = tray.get("tray_sub_brands", "") or ""
-
-                key = (tray_type.upper(), hex_color.lower(), tray_sub_brands.upper(), extruder_id)
-                if key not in seen:
-                    seen.add(key)
-                    filaments.append(
-                        {
-                            "type": tray_type,
-                            "color": color,
-                            "tray_info_idx": tray_info_idx,
-                            "tray_sub_brands": tray_sub_brands,
-                            "extruder_id": extruder_id,
-                        }
-                    )
-
-        # External spools (vt_tray)
-        for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if not vt_type:
-                continue
-            vt_color = vt.get("tray_color", "")
-            hex_color = vt_color.replace("#", "")[:6] if vt_color else "808080"
-            color = f"#{hex_color}"
-            tray_info_idx = vt.get("tray_info_idx", "")
-            tray_sub_brands = vt.get("tray_sub_brands", "") or ""
-            vt_id = int(vt.get("id", 254))
-            extruder_id = (255 - vt_id) if ams_extruder_map else None
-
-            key = (vt_type.upper(), hex_color.lower(), tray_sub_brands.upper(), extruder_id)
-            if key not in seen:
-                seen.add(key)
-                filaments.append(
-                    {
-                        "type": vt_type,
-                        "color": color,
-                        "tray_info_idx": tray_info_idx,
-                        "tray_sub_brands": tray_sub_brands,
-                        "extruder_id": extruder_id,
-                    }
-                )
-
-    return filaments
-
-
-@router.get("/developer-mode-warnings")
-async def get_developer_mode_warnings(
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-    db: AsyncSession = Depends(get_db),
-):
-    """Check if any connected printer lacks developer LAN mode."""
-    result = await db.execute(select(Printer).where(Printer.is_active == True))  # noqa: E712
-    printers = result.scalars().all()
-    statuses = printer_manager.get_all_statuses()
-
-    warnings = []
-    for printer in printers:
-        state = statuses.get(printer.id)
-        if state and state.connected and state.developer_mode is False:
-            warnings.append(
-                {
-                    "printer_id": printer.id,
-                    "name": printer.name,
-                }
-            )
-    return warnings
-
-
-@router.get("/{printer_id}", response_model=PrinterResponse)
-async def get_printer(
-    printer_id: int,
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get a specific printer."""
-    result = await db.execute(select(Printer).where(Printer.id == printer_id))
-    printer = result.scalar_one_or_none()
-    if not printer:
-        raise HTTPException(404, "Printer not found")
-    return printer
-
-
-@router.patch("/{printer_id}", response_model=PrinterResponse)
-async def update_printer(
-    printer_id: int,
-    printer_data: PrinterUpdate,
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_UPDATE),
-    db: AsyncSession = Depends(get_db),
-):
-    """Update a printer."""
-    result = await db.execute(select(Printer).where(Printer.id == printer_id))
-    printer = result.scalar_one_or_none()
-    if not printer:
-        raise HTTPException(404, "Printer not found")
-
-    update_data = printer_data.model_dump(exclude_unset=True)
-
-    # Handle nested ROI object - flatten to individual columns
-    if "plate_detection_roi" in update_data:
-        roi = update_data.pop("plate_detection_roi")
-        if roi:
-            update_data["plate_detection_roi_x"] = roi.get("x")
-            update_data["plate_detection_roi_y"] = roi.get("y")
-            update_data["plate_detection_roi_w"] = roi.get("w")
-            update_data["plate_detection_roi_h"] = roi.get("h")
-        else:
-            # Clear ROI if set to null
-            update_data["plate_detection_roi_x"] = None
-            update_data["plate_detection_roi_y"] = None
-            update_data["plate_detection_roi_w"] = None
-            update_data["plate_detection_roi_h"] = None
-
-    for field, value in update_data.items():
-        setattr(printer, field, value)
-
-    await db.commit()
-    await db.refresh(printer)
-
-    # Reconnect if connection settings changed
-    if any(k in update_data for k in ["ip_address", "access_code", "is_active"]):
-        printer_manager.disconnect_printer(printer_id)
-        if printer.is_active:
-            await printer_manager.connect_printer(printer)
-
-    return printer
-
-
-@router.delete("/{printer_id}")
-async def delete_printer(
-    printer_id: int,
-    delete_archives: bool = True,
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_DELETE),
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete a printer.
-
-    Args:
-        printer_id: ID of the printer to delete
-        delete_archives: If True (default), delete all print archives for this printer.
-                        If False, keep archives but remove their printer association.
-    """
-    from sqlalchemy import delete as sql_delete
-
-    from backend.app.models.archive import PrintArchive
-    from backend.app.models.maintenance import MaintenanceHistory, PrinterMaintenance
-
-    result = await db.execute(select(Printer).where(Printer.id == printer_id))
-    printer = result.scalar_one_or_none()
-    if not printer:
-        raise HTTPException(404, "Printer not found")
-
-    printer_manager.disconnect_printer(printer_id)
-
-    if delete_archives:
-        # Delete all archives for this printer
-        await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
-    else:
-        # Orphan the archives instead of deleting them
-        from sqlalchemy import update
-
-        await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
-
-    # Delete maintenance history and items for this printer
-    # (SQLite doesn't enforce FK cascades, so do it explicitly)
-    maintenance_ids = (
-        (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
-        .scalars()
-        .all()
-    )
-    if maintenance_ids:
-        await db.execute(
-            sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
-        )
-        await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
-
-    await db.delete(printer)
-    await db.commit()
-
-    return {"status": "deleted", "archives_deleted": delete_archives}
-
-
-@router.get("/{printer_id}/status", response_model=PrinterStatus)
-async def get_printer_status(
-    printer_id: int,
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get real-time status of a printer."""
-    result = await db.execute(select(Printer).where(Printer.id == printer_id))
-    printer = result.scalar_one_or_none()
-    if not printer:
-        raise HTTPException(404, "Printer not found")
-
+def _build_printer_status_response(printer: Printer) -> PrinterStatus:
+    """Build a serialized printer status payload from the cached manager state."""
+    printer_id = printer.id
     state = printer_manager.get_status(printer_id)
     if not state:
         return PrinterStatus(
@@ -611,6 +316,323 @@ async def get_printer_status(
         plate_cleared=printer_manager.is_plate_cleared(printer_id),
         supports_drying=supports_drying(printer.model, state.firmware_version),
     )
+
+
+@router.get("/", response_model=list[PrinterResponse])
+async def list_printers(
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all configured printers."""
+    result = await db.execute(select(Printer).order_by(Printer.name))
+    return list(result.scalars().all())
+
+
+@router.post("/", response_model=PrinterResponse)
+async def create_printer(
+    printer_data: PrinterCreate,
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CREATE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a new printer."""
+    # Check if serial number already exists
+    result = await db.execute(select(Printer).where(Printer.serial_number == printer_data.serial_number))
+    if result.scalar_one_or_none():
+        raise HTTPException(400, "Printer with this serial number already exists")
+
+    printer = Printer(**printer_data.model_dump())
+    db.add(printer)
+    await db.commit()
+    await db.refresh(printer)
+
+    # Connect to the printer
+    if printer.is_active:
+        await printer_manager.connect_printer(printer)
+
+    return printer
+
+
+@router.get("/usb-cameras")
+async def list_usb_cameras(
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    """List available USB cameras connected to the system.
+
+    Returns a list of detected V4L2 video devices with their info.
+    Only works on Linux systems with V4L2 support.
+
+    Returns:
+        List of dicts with {device: str, name: str, capabilities: list, formats?: list}
+    """
+    from backend.app.services.external_camera import list_usb_cameras
+
+    cameras = list_usb_cameras()
+    return {"cameras": cameras}
+
+
+@router.get("/available-filaments")
+async def get_available_filaments(
+    model: str = Query(..., description="Target printer model"),
+    location: str | None = Query(None, description="Optional location filter"),
+    _=RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get deduplicated list of filaments loaded across all active printers of a given model.
+
+    Used by the frontend to offer filament override options for model-based queue assignment.
+    """
+    from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
+
+    # Normalize model name
+    normalized_model = normalize_printer_model(model) or normalize_printer_model_id(model) or model
+
+    query = (
+        select(Printer).where(func.lower(Printer.model) == normalized_model.lower()).where(Printer.is_active == True)  # noqa: E712
+    )
+    if location:
+        query = query.where(Printer.location == location)
+
+    result = await db.execute(query)
+    printers_list = list(result.scalars().all())
+
+    if not printers_list:
+        return []
+
+    # Collect filaments from all matching printers
+    # Dedup key includes extruder_id and tray_sub_brands so "PLA Basic" and "PLA Matte" appear separately
+    seen: set[tuple[str, str, str, int | None]] = set()  # (type_upper, color_normalized, sub_brands_upper, extruder_id)
+    filaments = []
+
+    for printer in printers_list:
+        status = printer_manager.get_status(printer.id)
+        if not status:
+            continue
+
+        # Get ams_extruder_map for dual-nozzle printers
+        ams_extruder_map = status.raw_data.get("ams_extruder_map", {})
+
+        # AMS trays
+        for ams_unit in status.raw_data.get("ams", []):
+            ams_id = str(ams_unit.get("id", 0))
+            extruder_id = ams_extruder_map.get(ams_id)
+            for tray in ams_unit.get("tray", []):
+                tray_type = tray.get("tray_type")
+                if not tray_type:
+                    continue
+                tray_color = tray.get("tray_color", "")
+                # Normalize color: remove alpha, add hash
+                hex_color = tray_color.replace("#", "")[:6] if tray_color else "808080"
+                color = f"#{hex_color}"
+                tray_info_idx = tray.get("tray_info_idx", "")
+                tray_sub_brands = tray.get("tray_sub_brands", "") or ""
+
+                key = (tray_type.upper(), hex_color.lower(), tray_sub_brands.upper(), extruder_id)
+                if key not in seen:
+                    seen.add(key)
+                    filaments.append(
+                        {
+                            "type": tray_type,
+                            "color": color,
+                            "tray_info_idx": tray_info_idx,
+                            "tray_sub_brands": tray_sub_brands,
+                            "extruder_id": extruder_id,
+                        }
+                    )
+
+        # External spools (vt_tray)
+        for vt in status.raw_data.get("vt_tray") or []:
+            vt_type = vt.get("tray_type")
+            if not vt_type:
+                continue
+            vt_color = vt.get("tray_color", "")
+            hex_color = vt_color.replace("#", "")[:6] if vt_color else "808080"
+            color = f"#{hex_color}"
+            tray_info_idx = vt.get("tray_info_idx", "")
+            tray_sub_brands = vt.get("tray_sub_brands", "") or ""
+            vt_id = int(vt.get("id", 254))
+            extruder_id = (255 - vt_id) if ams_extruder_map else None
+
+            key = (vt_type.upper(), hex_color.lower(), tray_sub_brands.upper(), extruder_id)
+            if key not in seen:
+                seen.add(key)
+                filaments.append(
+                    {
+                        "type": vt_type,
+                        "color": color,
+                        "tray_info_idx": tray_info_idx,
+                        "tray_sub_brands": tray_sub_brands,
+                        "extruder_id": extruder_id,
+                    }
+                )
+
+    return filaments
+
+
+@router.get("/developer-mode-warnings")
+async def get_developer_mode_warnings(
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if any connected printer lacks developer LAN mode."""
+    result = await db.execute(select(Printer).where(Printer.is_active == True))  # noqa: E712
+    printers = result.scalars().all()
+    statuses = printer_manager.get_all_statuses()
+
+    warnings = []
+    for printer in printers:
+        state = statuses.get(printer.id)
+        if state and state.connected and state.developer_mode is False:
+            warnings.append(
+                {
+                    "printer_id": printer.id,
+                    "name": printer.name,
+                }
+            )
+    return warnings
+
+
+@router.get("/statuses", response_model=list[PrinterStatus])
+async def list_printer_statuses(
+    printer_ids: list[int] | None = Query(None, description="Optional list of printer IDs"),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get cached status payloads for multiple printers in one request."""
+    query = select(Printer)
+    if printer_ids:
+        query = query.where(Printer.id.in_(printer_ids))
+    query = query.order_by(Printer.name)
+
+    result = await db.execute(query)
+    printers = list(result.scalars().all())
+    return [_build_printer_status_response(printer) for printer in printers]
+
+
+@router.get("/{printer_id}", response_model=PrinterResponse)
+async def get_printer(
+    printer_id: int,
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific printer."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+    return printer
+
+
+@router.patch("/{printer_id}", response_model=PrinterResponse)
+async def update_printer(
+    printer_id: int,
+    printer_data: PrinterUpdate,
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_UPDATE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a printer."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    update_data = printer_data.model_dump(exclude_unset=True)
+
+    # Handle nested ROI object - flatten to individual columns
+    if "plate_detection_roi" in update_data:
+        roi = update_data.pop("plate_detection_roi")
+        if roi:
+            update_data["plate_detection_roi_x"] = roi.get("x")
+            update_data["plate_detection_roi_y"] = roi.get("y")
+            update_data["plate_detection_roi_w"] = roi.get("w")
+            update_data["plate_detection_roi_h"] = roi.get("h")
+        else:
+            # Clear ROI if set to null
+            update_data["plate_detection_roi_x"] = None
+            update_data["plate_detection_roi_y"] = None
+            update_data["plate_detection_roi_w"] = None
+            update_data["plate_detection_roi_h"] = None
+
+    for field, value in update_data.items():
+        setattr(printer, field, value)
+
+    await db.commit()
+    await db.refresh(printer)
+
+    # Reconnect if connection settings changed
+    if any(k in update_data for k in ["ip_address", "access_code", "is_active"]):
+        printer_manager.disconnect_printer(printer_id)
+        if printer.is_active:
+            await printer_manager.connect_printer(printer)
+
+    return printer
+
+
+@router.delete("/{printer_id}")
+async def delete_printer(
+    printer_id: int,
+    delete_archives: bool = True,
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_DELETE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a printer.
+
+    Args:
+        printer_id: ID of the printer to delete
+        delete_archives: If True (default), delete all print archives for this printer.
+                        If False, keep archives but remove their printer association.
+    """
+    from sqlalchemy import delete as sql_delete
+
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.maintenance import MaintenanceHistory, PrinterMaintenance
+
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    printer_manager.disconnect_printer(printer_id)
+
+    if delete_archives:
+        # Delete all archives for this printer
+        await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
+    else:
+        # Orphan the archives instead of deleting them
+        from sqlalchemy import update
+
+        await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
+
+    # Delete maintenance history and items for this printer
+    # (SQLite doesn't enforce FK cascades, so do it explicitly)
+    maintenance_ids = (
+        (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
+        .scalars()
+        .all()
+    )
+    if maintenance_ids:
+        await db.execute(
+            sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
+        )
+        await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
+
+    await db.delete(printer)
+    await db.commit()
+
+    return {"status": "deleted", "archives_deleted": delete_archives}
+
+
+@router.get("/{printer_id}/status", response_model=PrinterStatus)
+async def get_printer_status(
+    printer_id: int,
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get real-time status of a printer."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+    return _build_printer_status_response(printer)
 
 
 @router.get("/{printer_id}/current-print-user")

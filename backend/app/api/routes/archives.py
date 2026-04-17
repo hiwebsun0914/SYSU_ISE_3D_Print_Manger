@@ -25,7 +25,11 @@ from backend.app.models.spool_usage_history import SpoolUsageHistory
 from backend.app.models.user import User
 from backend.app.schemas.archive import ArchiveResponse, ArchiveSlim, ArchiveStats, ArchiveUpdate, ReprintRequest
 from backend.app.services.archive import ArchiveService
-from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
+from backend.app.utils.threemf_tools import (
+    extract_nozzle_mapping_from_3mf,
+    find_thumbnail_entry_in_3mf,
+    read_thumbnail_from_3mf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1392,24 +1396,40 @@ async def get_thumbnail(
     """
     service = ArchiveService(db)
     archive = await service.get_archive(archive_id)
-    if not archive or not archive.thumbnail_path:
+    if not archive:
         raise HTTPException(404, "Thumbnail not found")
 
-    thumb_path = settings.base_dir / archive.thumbnail_path
-    if not thumb_path.exists():
-        raise HTTPException(404, "Thumbnail file not found")
+    if archive.thumbnail_path:
+        thumb_path = settings.base_dir / archive.thumbnail_path
+        if thumb_path.exists():
+            # Use file modification time as ETag to bust cache
+            mtime = int(thumb_path.stat().st_mtime)
 
-    # Use file modification time as ETag to bust cache
-    mtime = int(thumb_path.stat().st_mtime)
+            return FileResponse(
+                path=thumb_path,
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "no-cache, must-revalidate",
+                    "ETag": f'"{mtime}"',
+                },
+            )
 
-    return FileResponse(
-        path=thumb_path,
-        media_type="image/png",
-        headers={
-            "Cache-Control": "no-cache, must-revalidate",
-            "ETag": f'"{mtime}"',
-        },
-    )
+    archive_path = settings.base_dir / archive.file_path
+    if archive_path.exists():
+        try:
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                thumbnail = read_thumbnail_from_3mf(zf)
+                if thumbnail:
+                    _entry, data, content_type = thumbnail
+                    return Response(
+                        content=data,
+                        media_type=content_type,
+                        headers={"Cache-Control": "no-cache, must-revalidate"},
+                    )
+        except Exception:
+            pass
+
+    raise HTTPException(404, "Thumbnail not found")
 
 
 @router.get("/{archive_id}/timelapse")
@@ -2449,12 +2469,10 @@ async def get_plate_preview(
 
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            names = zf.namelist()
-
             # Try to find plate preview images in order of preference
             # First look for the specific plate being printed (check slice_info for plate index)
             plate_num = 1
-            if "Metadata/slice_info.config" in names:
+            if "Metadata/slice_info.config" in zf.namelist():
                 try:
                     import defusedxml.ElementTree as ET
 
@@ -2466,23 +2484,10 @@ async def get_plate_preview(
                 except Exception:
                     pass  # Default plate_num=1 if slice_info is missing or malformed
 
-            # Try plate-specific image first, then fall back to plate_1
-            preview_paths = [
-                f"Metadata/plate_{plate_num}.png",
-                "Metadata/plate_1.png",
-                "Metadata/thumbnail.png",
-            ]
-
-            for preview_path in preview_paths:
-                if preview_path in names:
-                    image_data = zf.read(preview_path)
-                    return Response(content=image_data, media_type="image/png")
-
-            # If no plate image, try any PNG in Metadata
-            for name in names:
-                if name.startswith("Metadata/plate_") and name.endswith(".png") and "_small" not in name:
-                    image_data = zf.read(name)
-                    return Response(content=image_data, media_type="image/png")
+            thumbnail = read_thumbnail_from_3mf(zf, plate_number=plate_num)
+            if thumbnail:
+                _entry, image_data, content_type = thumbnail
+                return Response(content=image_data, media_type=content_type)
 
             raise HTTPException(404, "No plate preview found in 3MF file")
 
@@ -2815,7 +2820,7 @@ async def get_archive_plates(
             # Build plate list
             for idx in plate_indices:
                 meta = plate_metadata.get(idx, {})
-                has_thumbnail = f"Metadata/plate_{idx}.png" in namelist
+                has_thumbnail = find_thumbnail_entry_in_3mf(zf, plate_number=idx) is not None
                 objects = meta.get("objects", [])
                 if not objects:
                     objects = plate_json_objects.get(idx, [])
@@ -2878,10 +2883,10 @@ async def get_plate_thumbnail(
 
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            thumb_path = f"Metadata/plate_{plate_index}.png"
-            if thumb_path in zf.namelist():
-                data = zf.read(thumb_path)
-                return Response(content=data, media_type="image/png")
+            thumbnail = read_thumbnail_from_3mf(zf, plate_number=plate_index)
+            if thumbnail:
+                _entry, data, content_type = thumbnail
+                return Response(content=data, media_type=content_type)
     except Exception:
         pass  # Fall through to 404 if archive is unreadable or thumbnail missing
 
