@@ -1,11 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bambuddy-bootstrap="edge-cos-fallback">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>SYSU·ISE</title>
 
-    <!-- PWA Meta Tags -->
     <meta name="description" content="Monitor and manage your Bambu Lab 3D printers" />
     <meta name="theme-color" content="#00ae42" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -13,27 +12,260 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="SYSU·ISE" />
 
-    <!-- Manifest -->
-    <link rel="manifest" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/manifest.json" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/img/SYSU.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/img/SYSU.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/img/SYSU.png" />
+    <link rel="apple-touch-startup-image" href="/img/SYSU.png" />
+    <link rel="preconnect" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com" crossorigin />
 
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/img/SYSU.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/img/SYSU.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/img/SYSU.png" />
-
-    <!-- Splash screens for iOS -->
-    <link rel="apple-touch-startup-image" href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/img/SYSU.png" />
-    <script type="module" crossorigin src="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/assets/index-By7NB6Yd.js"></script>
-    <link rel="stylesheet" crossorigin href="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260416-cos-safe-01/assets/index-C20CIwo_.css">
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+        background: #08130d;
+        color: #ecfff1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top, rgba(0, 174, 66, 0.24), transparent 42%),
+          linear-gradient(180deg, #0b1811 0%, #050a07 100%);
+      }
+      #root {
+        min-height: 100vh;
+      }
+      .boot-shell {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .boot-card {
+        width: min(420px, 100%);
+        padding: 28px 24px;
+        border-radius: 24px;
+        background: rgba(7, 15, 10, 0.88);
+        border: 1px solid rgba(96, 255, 154, 0.16);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(10px);
+      }
+      .boot-brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .boot-brand img {
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.08);
+        padding: 8px;
+      }
+      .boot-brand h1 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 700;
+      }
+      .boot-brand p {
+        margin: 4px 0 0;
+        color: rgba(236, 255, 241, 0.72);
+        font-size: 0.92rem;
+      }
+      .boot-status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 18px 0 10px;
+      }
+      .boot-spinner {
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.14);
+        border-top-color: #4cff9a;
+        animation: boot-spin 0.9s linear infinite;
+      }
+      .boot-status strong {
+        display: block;
+        font-size: 0.98rem;
+      }
+      .boot-status span {
+        display: block;
+        margin-top: 4px;
+        color: rgba(236, 255, 241, 0.72);
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      .boot-hint {
+        margin: 18px 0 0;
+        color: rgba(236, 255, 241, 0.58);
+        font-size: 0.84rem;
+        line-height: 1.5;
+      }
+      .boot-actions {
+        margin-top: 18px;
+      }
+      .boot-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 112px;
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 999px;
+        background: #18c45f;
+        color: #031108;
+        font-size: 0.92rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .boot-actions button[hidden] {
+        display: none;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-shell">
+        <div class="boot-card">
+          <div class="boot-brand">
+            <img src="/img/SYSU.png" alt="SYSU" />
+            <div>
+              <h1>SYSU·ISE</h1>
+              <p>服务器先返回入口，主资源优先走 COS</p>
+            </div>
+          </div>
+          <div class="boot-status">
+            <div class="boot-spinner" aria-hidden="true"></div>
+            <div>
+              <strong data-boot-status>正在连接 COS</strong>
+              <span data-boot-detail>优先从边缘缓存加载前端主资源。</span>
+            </div>
+          </div>
+          <p class="boot-hint">如果边缘缓存响应超时，页面会自动切换到服务器本地资源，避免一直白屏。</p>
+          <div class="boot-actions">
+            <button type="button" data-boot-retry hidden>重新加载</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <!-- Service Worker Registration (skip on SpoolBuddy kiosk) -->
+    <script type="module">
+      const release = {
+        releaseId: "20260417-cos-boot-01",
+        cos: {
+          js: "https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260417-cos-boot-01/assets/index-Dvnf979T.js",
+          css: "https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260417-cos-boot-01/assets/index-C20CIwo_.css",
+          probe: "https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/frontend-releases/20260417-cos-boot-01/assets/index-Dvnf979T.js",
+        },
+        local: {
+          js: "/assets/index-CeSodUhS.js",
+          css: "/assets/index-C20CIwo_.css",
+        },
+        timeoutMs: 2500,
+      };
+
+      const statusEl = document.querySelector('[data-boot-status]');
+      const detailEl = document.querySelector('[data-boot-detail]');
+      const retryBtn = document.querySelector('[data-boot-retry]');
+
+      const setStatus = (title, detail) => {
+        if (statusEl) statusEl.textContent = title;
+        if (detailEl) detailEl.textContent = detail;
+      };
+
+      const loadStylesheet = (url) => new Promise((resolve, reject) => {
+        const href = new URL(url, window.location.href).href;
+        const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((link) => link.href === href);
+        if (existing) {
+          if (existing.dataset.loaded === '1') {
+            resolve(existing);
+            return;
+          }
+          existing.addEventListener('load', () => resolve(existing), { once: true });
+          existing.addEventListener('error', () => reject(new Error('Unable to load stylesheet ' + href)), { once: true });
+          return;
+        }
+
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        if (new URL(href).origin !== window.location.origin) {
+          link.crossOrigin = '';
+        }
+        link.addEventListener('load', () => {
+          link.dataset.loaded = '1';
+          resolve(link);
+        }, { once: true });
+        link.addEventListener('error', () => reject(new Error('Unable to load stylesheet ' + href)), { once: true });
+        document.head.appendChild(link);
+      });
+
+      const probeSource = async (url, timeoutMs) => {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(url, {
+            method: 'HEAD',
+            mode: 'cors',
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+          }
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      };
+
+      const loadEntry = async (source) => {
+        await loadStylesheet(source.css);
+        await import(source.js);
+      };
+
+      const showRetry = () => {
+        if (!retryBtn) return;
+        retryBtn.hidden = false;
+        retryBtn.addEventListener('click', () => window.location.reload(), { once: true });
+      };
+
+      window.__BAMBUDDY_EDGE_BOOT__ = release;
+
+      try {
+        await probeSource(release.cos.probe, release.timeoutMs);
+        setStatus('正在启动页面', 'COS 已响应，正在加载主应用。');
+        await loadEntry(release.cos);
+        document.documentElement.dataset.frontendSource = 'cos';
+      } catch (cosError) {
+        console.warn('[edge-bootstrap] COS load failed, falling back to local bundle', cosError);
+        try {
+          setStatus('切换服务器本地包', 'COS 响应较慢，正在使用服务器本地资源继续启动。');
+          await loadEntry(release.local);
+          document.documentElement.dataset.frontendSource = 'local';
+        } catch (localError) {
+          console.error('[edge-bootstrap] local fallback failed', localError);
+          setStatus('页面启动失败', '前端资源未能成功加载，请检查网络后重试。');
+          showRetry();
+          throw localError;
+        }
+      }
+    </script>
+
     <script>
       if ('serviceWorker' in navigator) {
         if (location.pathname.startsWith('/spoolbuddy')) {
-          // Kiosk mode — nuke SW and all caches, then reload once to get clean state
           navigator.serviceWorker.getRegistrations().then((regs) => {
             if (regs.length > 0) {
               Promise.all([

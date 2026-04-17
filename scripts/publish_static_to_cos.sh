@@ -77,22 +77,6 @@ content_type_for() {
   esac
 }
 
-rewrite_generated_files() {
-  log "rewriting generated files for COS-backed assets"
-
-  if [[ -f "${STATIC_DIR}/index.html" ]]; then
-    sed -i "s#${COS_BASE_URL}manifest.json#/manifest.json#g" "${STATIC_DIR}/index.html"
-  fi
-
-  if [[ -f "${STATIC_DIR}/manifest.json" ]]; then
-    sed -i "s#\"/img/#\"${COS_BASE_URL}img/#g" "${STATIC_DIR}/manifest.json"
-  fi
-
-  if [[ -f "${STATIC_DIR}/sw.js" ]]; then
-    sed -i "s#'/img/#'${COS_BASE_URL}img/#g" "${STATIC_DIR}/sw.js"
-  fi
-}
-
 cache_control_for() {
   case "$1" in
     assets/*)
@@ -150,32 +134,16 @@ verify_upload() {
 
   curl -fsSI "${main_asset}" >/dev/null
   curl -fsSI "${COS_BASE_URL}img/SYSU.png" >/dev/null
+  curl -fsSI "${COS_BASE_URL}icons/ams.png" >/dev/null
 
   css_headers="$(curl -fsSI "${css_asset}")"
   printf '%s' "${css_headers}" | grep -qi '^Content-Type: text/css' \
     || die "CSS asset does not have text/css content type: ${css_asset}"
 }
 
-verify_tree() {
-  while IFS= read -r -d '' file_path; do
-    local rel_path="${file_path#${STATIC_DIR}/}"
-    local target_url="${COS_BASE_URL}${rel_path}"
-
-    curl -fsSI --http1.1 \
-      --retry 5 \
-      --retry-all-errors \
-      --retry-delay 2 \
-      --connect-timeout 15 \
-      --max-time 120 \
-      "${target_url}" >/dev/null
-  done < <(find "${STATIC_DIR}/assets" "${STATIC_DIR}/img" "${STATIC_DIR}/icons" -type f -print0 2>/dev/null)
-}
-
-rewrite_generated_files
 upload_tree assets
 upload_tree img
 upload_tree icons
-verify_tree
 verify_upload
 
 log "COS publish complete"
