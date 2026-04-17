@@ -852,6 +852,14 @@ export default {
       allLocations: 'すべてのロケーション',
       any: 'すべて',
     },
+    search: {
+      placeholder: '氏名または学籍番号で検索',
+      ariaLabel: '氏名または学籍番号でキューを検索',
+      clear: '検索をクリア',
+      emptyTitle: '一致するキュー項目がありません',
+      emptyDescription: '別の氏名や学籍番号を試すか、現在のフィルターを調整してください。',
+      representativeMarker: 'この学生の代表タスク',
+    },
     // Sort
     sort: {
       byPosition: '順番で並べ替え',

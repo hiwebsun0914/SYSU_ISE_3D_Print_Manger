@@ -853,6 +853,14 @@ export default {
       allLocations: 'Tutte le posizioni',
       any: 'Qualsiasi',
     },
+    search: {
+      placeholder: 'Cerca per nome o matricola',
+      ariaLabel: 'Cerca nella coda per nome o matricola',
+      clear: 'Cancella ricerca',
+      emptyTitle: 'Nessun elemento della coda corrispondente',
+      emptyDescription: 'Prova con un altro nome o matricola, oppure modifica i filtri attivi.',
+      representativeMarker: 'Richiesta rappresentativa per questo studente',
+    },
     // Sort
     sort: {
       byPosition: 'Ordina per posizione',

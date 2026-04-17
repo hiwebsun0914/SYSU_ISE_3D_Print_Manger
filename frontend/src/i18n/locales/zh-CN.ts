@@ -877,6 +877,14 @@ export default {
       allLocations: '所有位置',
       any: '任意',
     },
+    search: {
+      placeholder: '检索姓名或学号',
+      ariaLabel: '按姓名或学号检索队列',
+      clear: '清空检索',
+      emptyTitle: '没有匹配的队列项',
+      emptyDescription: '试试输入别的姓名或学号，或调整当前筛选条件。',
+      representativeMarker: '该同学的代表任务',
+    },
     // Sort
     sort: {
       byPosition: '按位置排序',

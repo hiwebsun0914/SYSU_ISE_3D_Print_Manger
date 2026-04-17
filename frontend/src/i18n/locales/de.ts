@@ -853,6 +853,14 @@ export default {
       allLocations: 'Alle Standorte',
       any: 'Beliebig',
     },
+    search: {
+      placeholder: 'Nach Name oder Matrikelnummer suchen',
+      ariaLabel: 'Warteschlange nach Name oder Matrikelnummer durchsuchen',
+      clear: 'Suche löschen',
+      emptyTitle: 'Keine passenden Warteschlangeneinträge',
+      emptyDescription: 'Versuche einen anderen Namen oder eine andere Matrikelnummer oder passe die aktiven Filter an.',
+      representativeMarker: 'Repräsentativer Auftrag für diese Person',
+    },
     // Sort
     sort: {
       byPosition: 'Nach Position sortieren',

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
@@ -107,6 +107,50 @@ const mockPrinters = [
     created_at: '2024-01-01T00:00:00Z',
   },
 ];
+
+function createCustomRequestItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 100,
+    printer_id: 1,
+    target_model: null,
+    target_location: null,
+    required_filament_types: null,
+    waiting_reason: null,
+    archive_id: null,
+    library_file_id: null,
+    custom_request: true,
+    student_id: '20240001',
+    requester_name: 'Alice Zhang',
+    contact_email: 'alice@example.com',
+    contact_details_hidden: false,
+    request_model_url: 'https://makerworld.com.cn/zh/models/123',
+    request_model_title: 'Alice Request',
+    request_notes: null,
+    position: 1,
+    scheduled_time: null,
+    require_previous_success: false,
+    auto_off_after: false,
+    manual_start: true,
+    ams_mapping: null,
+    filament_overrides: null,
+    plate_id: null,
+    bed_levelling: true,
+    flow_cali: false,
+    vibration_cali: true,
+    layer_inspect: false,
+    timelapse: false,
+    use_ams: true,
+    status: 'pending',
+    started_at: null,
+    completed_at: null,
+    error_message: null,
+    created_at: '2024-01-01T00:00:00Z',
+    printer_name: 'Test Printer',
+    created_by_id: 1,
+    created_by_username: 'tester',
+    ...overrides,
+  };
+}
 
 describe('QueuePage', () => {
   beforeEach(() => {
@@ -286,6 +330,101 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('request search', () => {
+    it('filters manual requests by name or student ID', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => {
+          return HttpResponse.json([
+            createCustomRequestItem({
+              id: 101,
+              student_id: '20240001',
+              requester_name: 'Alice Zhang',
+              request_model_title: 'Alice Pending Request',
+            }),
+            createCustomRequestItem({
+              id: 102,
+              student_id: '20240002',
+              requester_name: 'Bob Li',
+              request_model_title: 'Bob Request',
+            }),
+          ]);
+        })
+      );
+
+      render(<QueuePage />);
+
+      const searchInput = await screen.findByLabelText('Search the queue by name or student ID');
+
+      await user.type(searchInput, '20240002');
+
+      await waitFor(() => {
+        expect(screen.getByText('Bob Request')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Alice Pending Request')).not.toBeInTheDocument();
+
+      await user.clear(searchInput);
+      await user.type(searchInput, 'Alice Zhang');
+
+      await waitFor(() => {
+        expect(screen.getByText('Alice Pending Request')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Bob Request')).not.toBeInTheDocument();
+    });
+
+    it('marks only one representative request card and prefers completed items', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => {
+          return HttpResponse.json([
+            createCustomRequestItem({
+              id: 201,
+              student_id: '20240001',
+              requester_name: 'Alice Zhang',
+              request_model_title: 'Alice Pending Request',
+              status: 'pending',
+            }),
+            createCustomRequestItem({
+              id: 202,
+              student_id: '20240001',
+              requester_name: 'Alice Zhang',
+              request_model_title: 'Alice Completed Request',
+              status: 'completed',
+              started_at: '2024-01-02T08:00:00Z',
+              completed_at: '2024-01-02T10:00:00Z',
+              created_at: '2024-01-02T00:00:00Z',
+            }),
+          ]);
+        })
+      );
+
+      render(<QueuePage />);
+
+      const searchInput = await screen.findByLabelText('Search the queue by name or student ID');
+      await user.type(searchInput, 'Alice');
+
+      await waitFor(() => {
+        expect(screen.getByText('Alice Pending Request')).toBeInTheDocument();
+        expect(screen.getByText('Alice Completed Request')).toBeInTheDocument();
+      });
+
+      const representativeLabels = screen.getAllByLabelText('Representative request for this student');
+      expect(representativeLabels).toHaveLength(1);
+
+      const completedCard = screen.getByText('Alice Completed Request').closest('.group');
+      expect(completedCard).not.toBeNull();
+      expect(
+        within(completedCard as HTMLElement).getByLabelText('Representative request for this student')
+      ).toBeInTheDocument();
+
+      const pendingCard = screen.getByText('Alice Pending Request').closest('.group');
+      expect(pendingCard).not.toBeNull();
+      expect(
+        within(pendingCard as HTMLElement).queryByLabelText('Representative request for this student')
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe('queue actions', () => {
     it('shows edit button for pending items', async () => {
       render(<QueuePage />);
@@ -342,7 +481,7 @@ describe('QueuePage', () => {
       });
     });
 
-    it('opens confirm modal when clicking clear history', async () => {
+    it('opens admin unlock modal when clicking clear history', async () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
@@ -354,7 +493,8 @@ describe('QueuePage', () => {
       await user.click(clearButton);
 
       await waitFor(() => {
-        expect(screen.getByText(/Are you sure you want to remove all/i)).toBeInTheDocument();
+        expect(screen.getByText('Unlock Delete Access')).toBeInTheDocument();
+        expect(screen.getByText('Admin Password')).toBeInTheDocument();
       });
     });
   });

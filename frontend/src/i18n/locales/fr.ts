@@ -853,6 +853,14 @@ export default {
       allLocations: 'Tous les emplacements',
       any: 'Tout',
     },
+    search: {
+      placeholder: 'Rechercher par nom ou numéro étudiant',
+      ariaLabel: 'Rechercher dans la file par nom ou numéro étudiant',
+      clear: 'Effacer la recherche',
+      emptyTitle: 'Aucun élément de file correspondant',
+      emptyDescription: 'Essayez un autre nom ou numéro étudiant, ou ajustez les filtres actifs.',
+      representativeMarker: 'Demande représentative pour cet étudiant',
+    },
     // Sort
     sort: {
       byPosition: 'Par position',

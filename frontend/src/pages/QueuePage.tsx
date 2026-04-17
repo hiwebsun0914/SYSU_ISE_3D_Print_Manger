@@ -53,6 +53,8 @@ import {
   Mail,
   EyeOff,
   Lock,
+  Search,
+  Star,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
@@ -94,6 +96,110 @@ function isThreemfFilename(filename: string | null | undefined): boolean {
 
 function shouldShowLibraryThumbnail(item: PrintQueueItem): boolean {
   return Boolean(item.library_file_thumbnail || isThreemfFilename(item.library_file_name));
+}
+
+function normalizeQueueRequestSearchValue(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? '';
+}
+
+function tokenizeQueueRequestSearch(query: string): string[] {
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function matchesQueueRequestSearch(item: PrintQueueItem, searchTokens: string[]): boolean {
+  if (searchTokens.length === 0) {
+    return true;
+  }
+  if (!item.custom_request) {
+    return false;
+  }
+
+  const searchableValues = [
+    normalizeQueueRequestSearchValue(item.student_id),
+    normalizeQueueRequestSearchValue(item.requester_name),
+  ].filter(Boolean);
+
+  if (searchableValues.length === 0) {
+    return false;
+  }
+
+  return searchTokens.every((token) => searchableValues.some((value) => value.includes(token)));
+}
+
+function getQueueRequestPersonKey(item: PrintQueueItem): string | null {
+  if (!item.custom_request) {
+    return null;
+  }
+
+  const studentId = normalizeQueueRequestSearchValue(item.student_id);
+  const requesterName = normalizeQueueRequestSearchValue(item.requester_name);
+
+  if (!studentId && !requesterName) {
+    return null;
+  }
+
+  return `${studentId}::${requesterName}`;
+}
+
+const queueRepresentativeStatusPriority: Record<PrintQueueItem['status'], number> = {
+  completed: 0,
+  printing: 1,
+  pending: 2,
+  failed: 3,
+  skipped: 4,
+  cancelled: 5,
+};
+
+function getQueueRepresentativeTimestamp(item: PrintQueueItem): number {
+  return parseUTCDate(item.completed_at || item.started_at || item.created_at)?.getTime() ?? 0;
+}
+
+function getQueueRequestRepresentativeIds(items: PrintQueueItem[]): Set<number> {
+  const representatives = new Map<string, PrintQueueItem>();
+
+  items.forEach((item) => {
+    const personKey = getQueueRequestPersonKey(item);
+    if (!personKey) {
+      return;
+    }
+
+    const currentRepresentative = representatives.get(personKey);
+    if (!currentRepresentative) {
+      representatives.set(personKey, item);
+      return;
+    }
+
+    const currentPriority = queueRepresentativeStatusPriority[currentRepresentative.status];
+    const candidatePriority = queueRepresentativeStatusPriority[item.status];
+    if (candidatePriority < currentPriority) {
+      representatives.set(personKey, item);
+      return;
+    }
+
+    if (candidatePriority > currentPriority) {
+      return;
+    }
+
+    const currentTimestamp = getQueueRepresentativeTimestamp(currentRepresentative);
+    const candidateTimestamp = getQueueRepresentativeTimestamp(item);
+    if (candidateTimestamp > currentTimestamp) {
+      representatives.set(personKey, item);
+      return;
+    }
+
+    if (
+      candidateTimestamp === currentTimestamp &&
+      item.position < currentRepresentative.position
+    ) {
+      representatives.set(personKey, item);
+    }
+  });
+
+  return new Set(Array.from(representatives.values(), (item) => item.id));
 }
 
 function StatusBadge({ status, waitingReason, printerState, t }: { status: PrintQueueItem['status']; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
@@ -484,6 +590,7 @@ function SortableQueueItem({
   isSelected = false,
   isUpdatingStatus = false,
   onToggleSelect,
+  isRequestSearchRepresentative = false,
   hasPermission,
   canModify,
   printerState,
@@ -502,6 +609,7 @@ function SortableQueueItem({
   isSelected?: boolean;
   isUpdatingStatus?: boolean;
   onToggleSelect?: () => void;
+  isRequestSearchRepresentative?: boolean;
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
   printerState?: string | null;
@@ -646,6 +754,15 @@ function SortableQueueItem({
               {displayName}
               {!item.custom_request && (platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
             </p>
+            {isRequestSearchRepresentative && (
+              <span
+                className="inline-flex items-center justify-center rounded-full border border-amber-400/30 bg-amber-400/10 p-1 text-amber-300 flex-shrink-0"
+                title={t('queue.search.representativeMarker')}
+                aria-label={t('queue.search.representativeMarker')}
+              >
+                <Star className="w-3 h-3 fill-current" />
+              </span>
+            )}
             {item.custom_request && item.request_model_url ? (
               <a
                 href={item.request_model_url}
@@ -960,6 +1077,7 @@ export function QueuePage() {
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
+  const [requestSearchQuery, setRequestSearchQuery] = useState('');
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [editingRequestItem, setEditingRequestItem] = useState<PrintQueueItem | null>(null);
@@ -1044,6 +1162,11 @@ export function QueuePage() {
     queryKey: ['printers'],
     queryFn: () => api.getPrinters(),
   });
+
+  const requestSearchTokens = useMemo(
+    () => tokenizeQueueRequestSearch(requestSearchQuery),
+    [requestSearchQuery]
+  );
 
   const createRequestMutation = useMutation({
     mutationFn: (data: { student_id: string; requester_name: string; contact_email: string; request_model_url: string; request_notes: string }) =>
@@ -1251,6 +1374,10 @@ export function QueuePage() {
     return false;
   }, [filterLocation, printers]);
 
+  const matchesRequestSearch = useCallback((item: PrintQueueItem): boolean => {
+    return matchesQueueRequestSearch(item, requestSearchTokens);
+  }, [requestSearchTokens]);
+
   const requestQueueAdminUnlock = useCallback(
     (action: { type: 'remove'; item: PrintQueueItem } | { type: 'clear-history' }) => {
       if (!canUnlockQueueAdmin) {
@@ -1284,13 +1411,20 @@ export function QueuePage() {
     requestQueueAdminUnlock({ type: 'clear-history' });
   }, [requestQueueAdminUnlock]);
 
-  const pendingItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'pending') || [];
+  const filteredQueue = useMemo(() => {
+    return (queue || []).filter((item) => matchesLocationFilter(item) && matchesRequestSearch(item));
+  }, [queue, matchesLocationFilter, matchesRequestSearch]);
 
-    // Apply location filter
-    if (filterLocation) {
-      items = items.filter(matchesLocationFilter);
+  const requestSearchRepresentativeIds = useMemo(() => {
+    if (requestSearchTokens.length === 0) {
+      return new Set<number>();
     }
+
+    return getQueueRequestRepresentativeIds(filteredQueue);
+  }, [filteredQueue, requestSearchTokens]);
+
+  const pendingItems = useMemo(() => {
+    const items = filteredQueue.filter(i => i.status === 'pending');
 
     // Helper to get scheduled time as timestamp (ASAP/placeholder = 0 for earliest)
     const getScheduledTime = (item: PrintQueueItem): number => {
@@ -1317,7 +1451,7 @@ export function QueuePage() {
       }
       return pendingSortAsc ? cmp : -cmp;
     });
-  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, t]);
+  }, [filteredQueue, pendingSortBy, pendingSortAsc, t]);
 
   const selectablePendingItems = useMemo(
     () => pendingItems.filter(item => !item.custom_request),
@@ -1334,12 +1468,8 @@ export function QueuePage() {
   };
 
   const activeItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'printing') || [];
-    if (filterLocation) {
-      items = items.filter(matchesLocationFilter);
-    }
-    return items;
-  }, [queue, filterLocation, matchesLocationFilter]);
+    return filteredQueue.filter(i => i.status === 'printing');
+  }, [filteredQueue]);
 
   // Get unique printer IDs from active items to fetch their statuses
   const activePrinterIds = useMemo(() => {
@@ -1372,10 +1502,7 @@ export function QueuePage() {
   }, [activePrinterIds, printerStatusQueries]);
 
   const historyItems = useMemo(() => {
-    let items = queue?.filter(i => ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)) || [];
-    if (filterLocation) {
-      items = items.filter(matchesLocationFilter);
-    }
+    const items = filteredQueue.filter(i => ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status));
     return [...items].sort((a, b) => {
       let cmp: number;
       if (historySortBy === 'name') {
@@ -1390,7 +1517,7 @@ export function QueuePage() {
       }
       return historySortAsc ? -cmp : cmp;
     });
-  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation, t]);
+  }, [filteredQueue, historySortBy, historySortAsc, t]);
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
@@ -1530,6 +1657,28 @@ export function QueuePage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
+        <div className="relative min-w-[220px] flex-[2] sm:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-bambu-gray" />
+          <input
+            type="search"
+            value={requestSearchQuery}
+            onChange={(e) => setRequestSearchQuery(e.target.value)}
+            placeholder={t('queue.search.placeholder')}
+            aria-label={t('queue.search.ariaLabel')}
+            className="w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-2 pl-9 pr-9 text-sm sm:text-base text-white placeholder:text-bambu-gray focus:border-bambu-green focus:outline-none"
+          />
+          {requestSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setRequestSearchQuery('')}
+              aria-label={t('queue.search.clear')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-bambu-gray transition-colors hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
         <select
           className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
           value={filterPrinter === -1 ? 'unassigned' : (filterPrinter || '')}
@@ -1602,6 +1751,14 @@ export function QueuePage() {
               {t('queue.empty.description')}
             </p>
           </Card>
+        ) : filteredQueue.length === 0 ? (
+          <Card className="p-12 text-center border-dashed">
+            <Search className="w-16 h-16 text-bambu-gray mx-auto mb-4 opacity-50" />
+            <h3 className="text-xl font-medium text-white mb-2">{t('queue.search.emptyTitle')}</h3>
+            <p className="text-bambu-gray max-w-md mx-auto">
+              {t('queue.search.emptyDescription')}
+            </p>
+          </Card>
         ) : (
           <div className="space-y-6 sm:space-y-8">
             {/* Active Prints */}
@@ -1625,6 +1782,7 @@ export function QueuePage() {
                       onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
                       timeFormat={timeFormat}
                       isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
+                      isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                       hasPermission={hasPermission}
                       canModify={canModify}
                       printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
@@ -1745,6 +1903,7 @@ export function QueuePage() {
                         isSelected={selectedItems.includes(item.id)}
                         isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                         onToggleSelect={() => handleToggleSelect(item.id)}
+                        isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                         hasPermission={hasPermission}
                         canModify={canModify}
                         t={t}
@@ -1803,6 +1962,7 @@ export function QueuePage() {
                     onSetCustomStatus={(status) => updateRequestStatusMutation.mutate({ id: item.id, status })}
                     timeFormat={timeFormat}
                     isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
+                    isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                     hasPermission={hasPermission}
                     canModify={canModify}
                     t={t}

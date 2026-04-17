@@ -853,6 +853,14 @@ export default {
       allLocations: 'Todos os Locais',
       any: 'Qualquer',
     },
+    search: {
+      placeholder: 'Buscar por nome ou matrícula',
+      ariaLabel: 'Buscar na fila por nome ou matrícula',
+      clear: 'Limpar busca',
+      emptyTitle: 'Nenhum item da fila correspondente',
+      emptyDescription: 'Tente outro nome ou matrícula, ou ajuste os filtros ativos.',
+      representativeMarker: 'Solicitação representativa deste aluno',
+    },
     // Sort
     sort: {
       byPosition: 'Ordenar por Posição',

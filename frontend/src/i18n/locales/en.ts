@@ -877,6 +877,14 @@ export default {
       allLocations: 'All Locations',
       any: 'Any',
     },
+    search: {
+      placeholder: 'Search by name or student ID',
+      ariaLabel: 'Search the queue by name or student ID',
+      clear: 'Clear search',
+      emptyTitle: 'No matching queue items',
+      emptyDescription: 'Try a different name or student ID, or adjust the active filters.',
+      representativeMarker: 'Representative request for this student',
+    },
     // Sort
     sort: {
       byPosition: 'Sort by Position',
