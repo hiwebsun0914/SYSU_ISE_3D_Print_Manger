@@ -1,7 +1,7 @@
 # Public Proxy Deployment
 
 This setup keeps Bambuddy and printer connectivity on the local development board,
-and uses a lightweight public server only for HTTPS entry and forwarding.
+and uses the public server for HTTPS entry, API cache warming, and JSON snapshot fallback.
 
 Recommended topology:
 
@@ -11,14 +11,17 @@ Recommended topology:
   - Initiates a WireGuard tunnel to the public server
 - Public server `43.160.198.64`:
   - Terminates HTTPS for `sysuzgxytj.top`
-  - Proxies requests through WireGuard to the board
+  - Serves the built frontend locally
+  - Proxies API requests through WireGuard to the board
+  - Keeps key API responses cached and mirrored as on-disk JSON snapshots
 
 Why this layout:
 
-- WebSocket traffic works cleanly
+- WebSocket traffic works cleanly while the board is online
 - MJPEG / long-lived streams work cleanly
 - File uploads and slicing downloads do not need special NAT hacks
 - The board stays private and only makes outbound connections
+- The public server can keep serving cached API data when the board or tunnel fails
 
 ## Address Plan
 
@@ -38,22 +41,43 @@ Create these records:
 
 1. Install Nginx and WireGuard.
 2. Copy [nginx/sysuzgxytj.top.conf](./nginx/sysuzgxytj.top.conf) to `/etc/nginx/conf.d/sysuzgxytj.top.conf`.
-3. Create `/var/www/letsencrypt`.
-4. Generate WireGuard keys and use [wireguard/vps-wg0.conf.example](./wireguard/vps-wg0.conf.example).
-5. Bring up WireGuard:
+3. Create the local snapshot directory:
+
+```bash
+mkdir -p /var/cache/bambuddy_snapshots
+```
+
+4. Copy the cache warmer assets:
+
+```bash
+mkdir -p /opt/bambuddy/deploy/public_proxy/systemd
+cp deploy/public_proxy/cache_warmer.py /opt/bambuddy/deploy/public_proxy/cache_warmer.py
+cp deploy/public_proxy/systemd/bambuddy-cache-warmer.service /etc/systemd/system/
+cp deploy/public_proxy/systemd/bambuddy-cache-warmer.timer /etc/systemd/system/
+```
+
+Optional when Bambuddy auth is enabled:
+
+```bash
+cp deploy/public_proxy/systemd/bambuddy-cache-warmer.env.example /etc/default/bambuddy-cache-warmer
+```
+
+5. Create `/var/www/letsencrypt`.
+6. Generate WireGuard keys and use [wireguard/vps-wg0.conf.example](./wireguard/vps-wg0.conf.example).
+7. Bring up WireGuard:
 
 ```bash
 wg-quick up wg0
 systemctl enable wg-quick@wg0
 ```
 
-6. Open these ports on the public server:
+8. Open these ports on the public server:
 
 - `80/tcp`
 - `443/tcp`
 - `51820/udp`
 
-7. Issue a certificate after DNS points to `43.160.198.64`:
+9. Issue a certificate after DNS points to `43.160.198.64`:
 
 ```bash
 curl -fsSL https://get.acme.sh | sh
@@ -65,11 +89,14 @@ curl -fsSL https://get.acme.sh | sh
   --reloadcmd "systemctl reload nginx"
 ```
 
-8. Validate and start Nginx:
+10. Validate and start Nginx:
 
 ```bash
 nginx -t
 systemctl enable --now nginx
+systemctl daemon-reload
+systemctl enable --now bambuddy-cache-warmer.timer
+systemctl start bambuddy-cache-warmer.service
 ```
 
 ## Local Board
@@ -95,3 +122,5 @@ https://sysuzgxytj.top
 - If uploads are very large, keep `client_max_body_size` high in Nginx.
 - If your camera feed is proxied through Bambuddy, the provided Nginx config already disables response buffering.
 - If the printer stream depends on direct LAN-only camera URLs, those URLs still need to be proxied through Bambuddy to be public.
+- The cache warmer intentionally fetches key `GET /api/v1/...` endpoints through the public hostname so nginx fills both proxy cache and the snapshot files under `/var/cache/bambuddy_snapshots`.
+- Real-time WebSocket updates still depend on the board being online; the snapshot fallback keeps page bootstrap data available, not live printer state streaming.

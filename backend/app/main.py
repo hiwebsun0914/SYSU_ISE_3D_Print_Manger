@@ -57,8 +57,11 @@ from backend.app.api.routes.support import init_debug_logging
 from backend.app.core.config import APP_VERSION, settings as app_settings
 from backend.app.core.database import async_session, engine, init_db
 from backend.app.core.websocket import ws_manager
+from backend.app.models.archive import PrintArchive
+from backend.app.models.printer import Printer
 from backend.app.models.smart_plug import SmartPlug
 from backend.app.services.archive import ArchiveService
+from backend.app.services.public_archive_backfill import sync_missing_public_archive_artifacts
 from backend.app.services.background_dispatch import background_dispatch
 from backend.app.services.bambu_ftp import download_file_async, get_ftp_retry_settings, with_ftp_retry
 from backend.app.services.bambu_mqtt import PrinterState
@@ -85,6 +88,13 @@ from backend.app.services.spoolman_tracking import (
     store_print_data as _store_spoolman_print_data,
 )
 from backend.app.services.tasmota import tasmota_service
+from backend.app.utils.time_sanity import (
+    MAX_REASONABLE_RUNTIME_GAP_SECONDS,
+    estimate_archive_duration_seconds,
+    is_reasonable_wall_clock,
+    is_suspicious_runtime_seconds,
+    repair_archive_timestamps,
+)
 
 
 # =============================================================================
@@ -258,6 +268,24 @@ _active_prints: dict[tuple[int, str], int] = {}
 _expected_prints: dict[tuple[int, str], int] = {}
 
 # Track starting energy for prints: {archive_id: starting_kwh}
+
+
+def _format_runtime_seconds(seconds: int) -> str:
+    """Format runtime seconds for human-readable logging."""
+    total_seconds = max(0, int(seconds))
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or parts:
+        parts.append(f"{hours}h")
+    if minutes or parts:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
 _print_energy_start: dict[int, float] = {}
 
 # Track AMS mapping for prints: {archive_id: [global_tray_id_per_slot]}
@@ -2749,6 +2777,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 status=status,
                 completed_at=datetime.now(timezone.utc) if status in ("completed", "failed", "aborted") else None,
                 failure_reason=failure_reason,
+                progress=data.get("last_progress"),
             )
             logger.info(
                 "[ARCHIVE] Archive %s status updated to %s, failure_reason=%s", archive_id, status, failure_reason
@@ -3495,13 +3524,27 @@ async def track_printer_runtime():
                             if last_update.tzinfo is None:
                                 last_update = last_update.replace(tzinfo=timezone.utc)
                             elapsed = (now - last_update).total_seconds()
-                            if elapsed > 0:
+                            if not is_reasonable_wall_clock(last_update):
+                                logger.warning(
+                                    "[%s] Runtime tracking skipped corrupted last_runtime_update=%s",
+                                    printer.name,
+                                    printer.last_runtime_update,
+                                )
+                                needs_commit = True
+                            elif elapsed > MAX_REASONABLE_RUNTIME_GAP_SECONDS:
+                                logger.warning(
+                                    "[%s] Runtime tracking skipped abnormal elapsed=%ss (clock jump or stale timestamp)",
+                                    printer.name,
+                                    int(elapsed),
+                                )
+                                needs_commit = True
+                            elif elapsed > 0:
                                 printer.runtime_seconds += int(elapsed)
                                 updated_count += 1
                                 needs_commit = True
                                 logger.debug(
                                     f"[{printer.name}] Runtime tracking: added {int(elapsed)}s, "
-                                    f"total={printer.runtime_seconds}s ({printer.runtime_seconds / 3600:.2f}h)"
+                                    f"total={_format_runtime_seconds(printer.runtime_seconds)}"
                                 )
                         else:
                             # First time seeing printer active - need to commit to save timestamp
@@ -3538,6 +3581,106 @@ def start_runtime_tracking():
     if _runtime_tracking_task is None:
         _runtime_tracking_task = asyncio.create_task(track_printer_runtime())
         logging.getLogger(__name__).info("Printer runtime tracking started")
+
+
+async def repair_suspicious_time_data():
+    """Repair obviously bad archive timestamps and runtime counters caused by unsynced clocks."""
+    logger = logging.getLogger(__name__)
+    from backend.app.models.maintenance import MaintenanceHistory, PrinterMaintenance
+
+    async with async_session() as db:
+        archive_result = await db.execute(select(PrintArchive))
+        archives = archive_result.scalars().all()
+
+        repaired_archives = 0
+        archive_seconds_by_printer: dict[int, int] = {}
+
+        for archive in archives:
+            if repair_archive_timestamps(archive):
+                repaired_archives += 1
+
+            if archive.printer_id is not None and archive.status != "printing":
+                archive_seconds_by_printer[archive.printer_id] = archive_seconds_by_printer.get(archive.printer_id, 0) + (
+                    estimate_archive_duration_seconds(archive) or 0
+                )
+
+        printer_result = await db.execute(select(Printer))
+        printers = printer_result.scalars().all()
+
+        repaired_printers = 0
+        cleared_runtime_updates = 0
+        repaired_maintenance_hours = 0
+
+        current_hours_by_printer: dict[int, float] = {}
+
+        for printer in printers:
+            if is_suspicious_runtime_seconds(printer.runtime_seconds):
+                replacement_seconds = archive_seconds_by_printer.get(printer.id, 0)
+                logger.warning(
+                    "[%s] Replacing suspicious runtime_seconds=%s with archive-derived %s",
+                    printer.name,
+                    printer.runtime_seconds,
+                    replacement_seconds,
+                )
+                printer.runtime_seconds = replacement_seconds
+                repaired_printers += 1
+
+            if printer.last_runtime_update and not is_reasonable_wall_clock(printer.last_runtime_update):
+                logger.warning(
+                    "[%s] Clearing suspicious last_runtime_update=%s",
+                    printer.name,
+                    printer.last_runtime_update,
+                )
+                printer.last_runtime_update = None
+                cleared_runtime_updates += 1
+
+            current_hours_by_printer[printer.id] = ((printer.runtime_seconds or 0) / 3600.0) + (
+                printer.print_hours_offset or 0
+            )
+
+        maintenance_result = await db.execute(select(PrinterMaintenance))
+        maintenance_items = maintenance_result.scalars().all()
+
+        for item in maintenance_items:
+            current_hours = current_hours_by_printer.get(item.printer_id, 0.0)
+            if item.last_performed_hours > current_hours:
+                logger.warning(
+                    "Repairing maintenance item %s last_performed_hours=%s -> %s",
+                    item.id,
+                    item.last_performed_hours,
+                    current_hours,
+                )
+                item.last_performed_hours = current_hours
+                repaired_maintenance_hours += 1
+
+        history_result = await db.execute(select(MaintenanceHistory))
+        history_rows = history_result.scalars().all()
+
+        maintenance_by_id = {item.id: item for item in maintenance_items}
+        for row in history_rows:
+            maintenance_item = maintenance_by_id.get(row.printer_maintenance_id)
+            if not maintenance_item:
+                continue
+            current_hours = current_hours_by_printer.get(maintenance_item.printer_id, 0.0)
+            if row.hours_at_maintenance > current_hours:
+                logger.warning(
+                    "Repairing maintenance history %s hours_at_maintenance=%s -> %s",
+                    row.id,
+                    row.hours_at_maintenance,
+                    current_hours,
+                )
+                row.hours_at_maintenance = current_hours
+                repaired_maintenance_hours += 1
+
+        if repaired_archives or repaired_printers or cleared_runtime_updates or repaired_maintenance_hours:
+            await db.commit()
+            logger.warning(
+                "Repaired %s archive timestamp(s), %s runtime counter(s), cleared %s runtime checkpoint(s), fixed %s maintenance hour record(s)",
+                repaired_archives,
+                repaired_printers,
+                cleared_runtime_updates,
+                repaired_maintenance_hours,
+            )
 
 
 def stop_runtime_tracking():
@@ -3617,6 +3760,58 @@ def stop_camera_cleanup():
         logging.getLogger(__name__).info("Camera stream cleanup stopped")
 
 
+# Public archive backfill
+_public_archive_backfill_task: asyncio.Task | None = None
+PUBLIC_ARCHIVE_BACKFILL_INTERVAL = 600
+PUBLIC_ARCHIVE_BACKFILL_RECENT_LIMIT = 100
+
+
+async def _public_archive_backfill_loop():
+    """Keep public object storage in sync with local archive artifacts."""
+    logger = logging.getLogger(__name__)
+    first_run = True
+
+    while True:
+        try:
+            async with async_session() as db:
+                stats = await sync_missing_public_archive_artifacts(
+                    db,
+                    archive_limit=None if first_run else PUBLIC_ARCHIVE_BACKFILL_RECENT_LIMIT,
+                )
+
+            if stats["synced"] or stats["failed"]:
+                logger.info(
+                    "Public archive backfill scanned %s archive(s): synced=%s already_public=%s missing_local=%s failed=%s",
+                    stats["archives_scanned"],
+                    stats["synced"],
+                    stats["already_public"],
+                    stats["missing_local"],
+                    stats["failed"],
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("Public archive backfill failed: %s", e)
+
+        first_run = False
+        await asyncio.sleep(PUBLIC_ARCHIVE_BACKFILL_INTERVAL)
+
+
+def start_public_archive_backfill() -> None:
+    global _public_archive_backfill_task
+    if _public_archive_backfill_task is None:
+        _public_archive_backfill_task = asyncio.create_task(_public_archive_backfill_loop())
+        logging.getLogger(__name__).info("Public archive backfill started")
+
+
+def stop_public_archive_backfill() -> None:
+    global _public_archive_backfill_task
+    if _public_archive_backfill_task:
+        _public_archive_backfill_task.cancel()
+        _public_archive_backfill_task = None
+        logging.getLogger(__name__).info("Public archive backfill stopped")
+
+
 # ---------------------------------------------------------------------------
 # Expected-print TTL eviction
 # ---------------------------------------------------------------------------
@@ -3689,6 +3884,7 @@ def stop_expected_prints_cleanup() -> None:
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
+    await repair_suspicious_time_data()
 
     # Fix queue items stuck with invalid "aborted" status (should be "cancelled").
     # This can happen when a print was cancelled mid-print on versions before this fix.
@@ -3842,6 +4038,9 @@ async def lifespan(app: FastAPI):
     # Start public live camera cache cleanup
     public_live_camera_service.start()
 
+    # Backfill missing archive artifacts to public object storage
+    start_public_archive_backfill()
+
     # Start expected-print TTL eviction (prevents memory leak when prints are
     # registered but on_print_start never fires)
     start_expected_prints_cleanup()
@@ -3869,6 +4068,7 @@ async def lifespan(app: FastAPI):
     stop_spoolbuddy_watchdog()
     stop_camera_cleanup()
     public_live_camera_service.stop()
+    stop_public_archive_backfill()
     stop_expected_prints_cleanup()
     printer_manager.disconnect_all()
     await close_spoolman_client()

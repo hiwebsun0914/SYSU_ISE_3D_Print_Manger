@@ -41,6 +41,7 @@ from backend.app.services.printer_manager import (
     supports_chamber_temp,
     supports_drying,
 )
+from backend.app.utils.time_sanity import is_suspicious_runtime_seconds
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
@@ -2725,14 +2726,15 @@ async def get_runtime_debug(
         raise HTTPException(404, "Printer not found")
 
     state = printer_manager.get_status(printer_id)
+    runtime_seconds = printer.runtime_seconds or 0
 
     return {
         "printer_name": printer.name,
-        "runtime_seconds": printer.runtime_seconds,
-        "runtime_hours": printer.runtime_seconds / 3600.0 if printer.runtime_seconds else 0,
+        "runtime_seconds": runtime_seconds,
+        "runtime_hours": runtime_seconds / 3600.0 if runtime_seconds else 0,
         "print_hours_offset": printer.print_hours_offset,
-        "total_hours": (printer.runtime_seconds / 3600.0 if printer.runtime_seconds else 0)
-        + (printer.print_hours_offset or 0),
+        "total_hours": (runtime_seconds / 3600.0 if runtime_seconds else 0) + (printer.print_hours_offset or 0),
+        "runtime_suspicious": is_suspicious_runtime_seconds(runtime_seconds),
         "last_runtime_update": printer.last_runtime_update.isoformat() if printer.last_runtime_update else None,
         "mqtt_state": {
             "connected": state.connected if state else False,

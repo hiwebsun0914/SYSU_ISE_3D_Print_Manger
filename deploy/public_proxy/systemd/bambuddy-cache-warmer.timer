@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Bambuddy API cache and snapshots every 2 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

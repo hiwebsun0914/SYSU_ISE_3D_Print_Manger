@@ -1,5 +1,7 @@
 """Integration tests for Maintenance API endpoints."""
 
+from datetime import datetime, timezone
+
 import pytest
 from httpx import AsyncClient
 
@@ -224,6 +226,28 @@ class TestPrinterHoursAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["total_hours"] == 500.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_overview_falls_back_from_suspicious_runtime_counter(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """Verify obviously broken runtime counters don't leak into maintenance totals."""
+        printer = await printer_factory(name="Runtime Repair Printer")
+        printer.runtime_seconds = 3552953759
+        await db_session.commit()
+
+        archive = await archive_factory(printer.id)
+        archive.status = "completed"
+        archive.print_time_seconds = 3600
+        archive.started_at = datetime(2026, 4, 17, 7, 0, 0, tzinfo=timezone.utc)
+        archive.completed_at = datetime(2026, 4, 17, 8, 0, 0, tzinfo=timezone.utc)
+        await db_session.commit()
+
+        response = await async_client.get(f"/api/v1/maintenance/printers/{printer.id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_print_hours"] == 1.0
 
     @pytest.mark.asyncio
     @pytest.mark.integration

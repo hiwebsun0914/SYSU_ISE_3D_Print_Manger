@@ -16,6 +16,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.filament import Filament
 from backend.app.models.printer import Printer
 from backend.app.services.public_file_sync import delete_public_file, sync_public_file
+from backend.app.utils.time_sanity import repair_archive_timestamps
 from backend.app.utils.threemf_tools import find_thumbnail_entry_in_3mf
 
 logger = logging.getLogger(__name__)
@@ -921,6 +922,8 @@ class ArchiveService:
         # Copy 3MF file
         dest_file = archive_dir / source_file.name
         shutil.copy2(source_file, dest_file)
+        archive_relative_path = str(dest_file.relative_to(settings.base_dir))
+        await sync_public_file(archive_relative_path, dest_file)
 
         # Compute content hash for duplicate detection
         content_hash = self.compute_file_hash(dest_file)
@@ -988,7 +991,7 @@ class ArchiveService:
         archive = PrintArchive(
             printer_id=printer_id,
             filename=original_filename or source_file.name,
-            file_path=str(dest_file.relative_to(settings.base_dir)),
+            file_path=archive_relative_path,
             file_size=dest_file.stat().st_size,
             content_hash=content_hash,
             thumbnail_path=thumbnail_path,
@@ -1037,6 +1040,7 @@ class ArchiveService:
         status: str,
         completed_at: datetime | None = None,
         failure_reason: str | None = None,
+        progress: float | None = None,
     ) -> bool:
         """Update the status of an archive."""
         archive = await self.get_archive(archive_id)
@@ -1046,6 +1050,7 @@ class ArchiveService:
         archive.status = status
         if completed_at:
             archive.completed_at = completed_at
+            repair_archive_timestamps(archive, completed_at=completed_at, progress=progress)
         if failure_reason:
             archive.failure_reason = failure_reason
 
@@ -1137,7 +1142,13 @@ class ArchiveService:
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.
-        public_paths_to_delete = [archive.thumbnail_path, archive.timelapse_path]
+        public_paths_to_delete = [
+            archive.file_path,
+            archive.thumbnail_path,
+            archive.timelapse_path,
+            archive.source_3mf_path,
+            archive.f3d_path,
+        ]
         await self.db.delete(archive)
         await self.db.commit()
 

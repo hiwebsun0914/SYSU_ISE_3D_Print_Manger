@@ -25,6 +25,8 @@ from backend.app.models.spool_usage_history import SpoolUsageHistory
 from backend.app.models.user import User
 from backend.app.schemas.archive import ArchiveResponse, ArchiveSlim, ArchiveStats, ArchiveUpdate, ReprintRequest
 from backend.app.services.archive import ArchiveService
+from backend.app.services.public_file_sync import delete_public_file, sync_public_file
+from backend.app.utils.time_sanity import compute_reasonable_duration_seconds
 from backend.app.utils.threemf_tools import (
     extract_nozzle_mapping_from_3mf,
     find_thumbnail_entry_in_3mf,
@@ -48,8 +50,8 @@ def compute_time_accuracy(archive: PrintArchive) -> dict:
     result = {"actual_time_seconds": None, "time_accuracy": None}
 
     if archive.started_at and archive.completed_at and archive.status == "completed":
-        actual_seconds = int((archive.completed_at - archive.started_at).total_seconds())
-        if actual_seconds > 0:
+        actual_seconds = compute_reasonable_duration_seconds(archive.started_at, archive.completed_at)
+        if actual_seconds is not None:
             result["actual_time_seconds"] = actual_seconds
 
             if archive.print_time_seconds and archive.print_time_seconds > 0:
@@ -296,14 +298,7 @@ async def list_archives_slim(
             "printer_id": r.printer_id,
             "print_name": r.print_name,
             "print_time_seconds": r.print_time_seconds,
-            "actual_time_seconds": (
-                int((r.completed_at - r.started_at).total_seconds())
-                if r.started_at
-                and r.completed_at
-                and r.status == "completed"
-                and (r.completed_at - r.started_at).total_seconds() > 0
-                else None
-            ),
+            "actual_time_seconds": compute_reasonable_duration_seconds(r.started_at, r.completed_at),
             "filament_used_grams": r.filament_used_grams,
             "filament_type": r.filament_type,
             "filament_color": r.filament_color,
@@ -652,11 +647,9 @@ async def get_archive_stats(
     )
     total_seconds = 0
     for started_at, completed_at, print_time_seconds in archives_for_time.all():
-        if started_at and completed_at:
-            # Use actual elapsed time
-            actual_seconds = (completed_at - started_at).total_seconds()
-            if actual_seconds > 0:
-                total_seconds += actual_seconds
+        actual_seconds = compute_reasonable_duration_seconds(started_at, completed_at)
+        if actual_seconds is not None:
+            total_seconds += actual_seconds
         elif print_time_seconds:
             # Fallback to estimate only if no timestamps
             total_seconds += print_time_seconds
@@ -1485,13 +1478,15 @@ async def delete_timelapse(
         raise HTTPException(404, "No timelapse attached to this archive")
 
     # Delete the file
-    timelapse_path = settings.base_dir / archive.timelapse_path
+    timelapse_relative_path = archive.timelapse_path
+    timelapse_path = settings.base_dir / timelapse_relative_path
     if timelapse_path.exists():
         timelapse_path.unlink()
 
     # Clear the path in database
     archive.timelapse_path = None
     await db.commit()
+    await delete_public_file(timelapse_relative_path)
 
     return {"status": "deleted"}
 
@@ -3171,6 +3166,8 @@ async def update_project_page(
     if not success:
         raise HTTPException(500, "Failed to update project page")
 
+    await sync_public_file(archive.file_path, file_path)
+
     # Return updated data
     data = parser.parse(archive_id)
     return data
@@ -3239,6 +3236,7 @@ async def upload_source_3mf(
     source_dir.mkdir(exist_ok=True)
 
     # Delete old source file if exists
+    old_source_relative_path = archive.source_3mf_path
     if archive.source_3mf_path:
         old_source_path = settings.base_dir / archive.source_3mf_path
         if old_source_path.exists():
@@ -3256,6 +3254,9 @@ async def upload_source_3mf(
 
     await db.commit()
     await db.refresh(archive)
+    await sync_public_file(archive.source_3mf_path, source_path)
+    if old_source_relative_path and old_source_relative_path != archive.source_3mf_path:
+        await delete_public_file(old_source_relative_path)
 
     return {
         "status": "uploaded",
@@ -3438,6 +3439,7 @@ async def upload_source_3mf_by_name(
     source_dir.mkdir(exist_ok=True)
 
     # Delete old source file if exists
+    old_source_relative_path = archive.source_3mf_path
     if archive.source_3mf_path:
         old_source_path = settings.base_dir / archive.source_3mf_path
         if old_source_path.exists():
@@ -3454,6 +3456,9 @@ async def upload_source_3mf_by_name(
     archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
     await db.commit()
     await db.refresh(archive)
+    await sync_public_file(archive.source_3mf_path, source_path)
+    if old_source_relative_path and old_source_relative_path != archive.source_3mf_path:
+        await delete_public_file(old_source_relative_path)
 
     return {
         "status": "uploaded",
@@ -3480,13 +3485,15 @@ async def delete_source_3mf(
         raise HTTPException(404, "No source 3MF attached to this archive")
 
     # Delete the file
-    source_path = settings.base_dir / archive.source_3mf_path
+    source_relative_path = archive.source_3mf_path
+    source_path = settings.base_dir / source_relative_path
     if source_path.exists():
         source_path.unlink()
 
     # Clear the path in database
     archive.source_3mf_path = None
     await db.commit()
+    await delete_public_file(source_relative_path)
 
     return {"status": "deleted"}
 
@@ -3519,6 +3526,7 @@ async def upload_f3d(
     f3d_dir.mkdir(exist_ok=True)
 
     # Delete old F3D file if exists
+    old_f3d_relative_path = archive.f3d_path
     if archive.f3d_path:
         old_f3d_path = settings.base_dir / archive.f3d_path
         if old_f3d_path.exists():
@@ -3536,6 +3544,9 @@ async def upload_f3d(
 
     await db.commit()
     await db.refresh(archive)
+    await sync_public_file(archive.f3d_path, f3d_path)
+    if old_f3d_relative_path and old_f3d_relative_path != archive.f3d_path:
+        await delete_public_file(old_f3d_relative_path)
 
     return {
         "status": "uploaded",
@@ -3589,12 +3600,14 @@ async def delete_f3d(
         raise HTTPException(404, "No F3D file attached to this archive")
 
     # Delete the file
-    f3d_path = settings.base_dir / archive.f3d_path
+    f3d_relative_path = archive.f3d_path
+    f3d_path = settings.base_dir / f3d_relative_path
     if f3d_path.exists():
         f3d_path.unlink()
 
     # Clear the path in database
     archive.f3d_path = None
     await db.commit()
+    await delete_public_file(f3d_relative_path)
 
     return {"status": "deleted"}

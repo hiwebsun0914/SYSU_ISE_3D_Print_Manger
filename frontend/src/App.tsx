@@ -1,5 +1,5 @@
-import { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, lazy, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -8,34 +8,80 @@ import { ToastProvider } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SpoolBuddyLayout } from './components/spoolbuddy/SpoolBuddyLayout';
 
-const PrintersPage = lazy(() => import('./pages/PrintersPage').then((m) => ({ default: m.PrintersPage })));
-const ArchivesPage = lazy(() => import('./pages/ArchivesPage').then((m) => ({ default: m.ArchivesPage })));
-const QueuePage = lazy(() => import('./pages/QueuePage').then((m) => ({ default: m.QueuePage })));
-const StatsPage = lazy(() => import('./pages/StatsPage').then((m) => ({ default: m.StatsPage })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const ProfilesPage = lazy(() => import('./pages/ProfilesPage').then((m) => ({ default: m.ProfilesPage })));
-const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then((m) => ({ default: m.MaintenancePage })));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })));
-const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage').then((m) => ({ default: m.ProjectDetailPage })));
-const FileManagerPage = lazy(() => import('./pages/FileManagerPage').then((m) => ({ default: m.FileManagerPage })));
-const OnlineSlicerPage = lazy(() => import('./pages/OnlineSlicerPage').then((m) => ({ default: m.OnlineSlicerPage })));
-const KiriMotoPage = lazy(() => import('./pages/KiriMotoPage').then((m) => ({ default: m.KiriMotoPage })));
-const ModelLibraryPage = lazy(() => import('./pages/ModelLibraryPage').then((m) => ({ default: m.ModelLibraryPage })));
-const CameraPage = lazy(() => import('./pages/CameraPage').then((m) => ({ default: m.CameraPage })));
-const StreamOverlayPage = lazy(() => import('./pages/StreamOverlayPage').then((m) => ({ default: m.StreamOverlayPage })));
-const ExternalLinkPage = lazy(() => import('./pages/ExternalLinkPage').then((m) => ({ default: m.ExternalLinkPage })));
-const GroupEditPage = lazy(() => import('./pages/GroupEditPage').then((m) => ({ default: m.GroupEditPage })));
-const InventoryPage = lazy(() => import('./pages/InventoryPage'));
-const SystemInfoPage = lazy(() => import('./pages/SystemInfoPage').then((m) => ({ default: m.SystemInfoPage })));
-const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
-const SetupPage = lazy(() => import('./pages/SetupPage').then((m) => ({ default: m.SetupPage })));
-const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then((m) => ({ default: m.NotificationsPage })));
-const SpoolBuddyDashboard = lazy(() => import('./pages/spoolbuddy/SpoolBuddyDashboard').then((m) => ({ default: m.SpoolBuddyDashboard })));
-const SpoolBuddyAmsPage = lazy(() => import('./pages/spoolbuddy/SpoolBuddyAmsPage').then((m) => ({ default: m.SpoolBuddyAmsPage })));
-const SpoolBuddySettingsPage = lazy(() => import('./pages/spoolbuddy/SpoolBuddySettingsPage').then((m) => ({ default: m.SpoolBuddySettingsPage })));
-const SpoolBuddyCalibrationPage = lazy(() => import('./pages/spoolbuddy/SpoolBuddyCalibrationPage').then((m) => ({ default: m.SpoolBuddyCalibrationPage })));
-const SpoolBuddyWriteTagPage = lazy(() => import('./pages/spoolbuddy/SpoolBuddyWriteTagPage').then((m) => ({ default: m.SpoolBuddyWriteTagPage })));
-const SpoolBuddyInventoryPage = lazy(() => import('./pages/spoolbuddy/SpoolBuddyInventoryPage').then((m) => ({ default: m.SpoolBuddyInventoryPage })));
+const loadPrintersPage = () => import('./pages/PrintersPage');
+const loadArchivesPage = () => import('./pages/ArchivesPage');
+const loadQueuePage = () => import('./pages/QueuePage');
+const loadStatsPage = () => import('./pages/StatsPage');
+const loadSettingsPage = () => import('./pages/SettingsPage');
+const loadProfilesPage = () => import('./pages/ProfilesPage');
+const loadMaintenancePage = () => import('./pages/MaintenancePage');
+const loadProjectsPage = () => import('./pages/ProjectsPage');
+const loadProjectDetailPage = () => import('./pages/ProjectDetailPage');
+const loadFileManagerPage = () => import('./pages/FileManagerPage');
+const loadOnlineSlicerPage = () => import('./pages/OnlineSlicerPage');
+const loadKiriMotoPage = () => import('./pages/KiriMotoPage');
+const loadModelLibraryPage = () => import('./pages/ModelLibraryPage');
+const loadCameraPage = () => import('./pages/CameraPage');
+const loadStreamOverlayPage = () => import('./pages/StreamOverlayPage');
+const loadExternalLinkPage = () => import('./pages/ExternalLinkPage');
+const loadGroupEditPage = () => import('./pages/GroupEditPage');
+const loadInventoryPage = () => import('./pages/InventoryPage');
+const loadSystemInfoPage = () => import('./pages/SystemInfoPage');
+const loadLoginPage = () => import('./pages/LoginPage');
+const loadSetupPage = () => import('./pages/SetupPage');
+const loadNotificationsPage = () => import('./pages/NotificationsPage');
+const loadSpoolBuddyDashboard = () => import('./pages/spoolbuddy/SpoolBuddyDashboard');
+const loadSpoolBuddyAmsPage = () => import('./pages/spoolbuddy/SpoolBuddyAmsPage');
+const loadSpoolBuddySettingsPage = () => import('./pages/spoolbuddy/SpoolBuddySettingsPage');
+const loadSpoolBuddyCalibrationPage = () => import('./pages/spoolbuddy/SpoolBuddyCalibrationPage');
+const loadSpoolBuddyWriteTagPage = () => import('./pages/spoolbuddy/SpoolBuddyWriteTagPage');
+const loadSpoolBuddyInventoryPage = () => import('./pages/spoolbuddy/SpoolBuddyInventoryPage');
+
+const PrintersPage = lazy(() => loadPrintersPage().then((m) => ({ default: m.PrintersPage })));
+const ArchivesPage = lazy(() => loadArchivesPage().then((m) => ({ default: m.ArchivesPage })));
+const QueuePage = lazy(() => loadQueuePage().then((m) => ({ default: m.QueuePage })));
+const StatsPage = lazy(() => loadStatsPage().then((m) => ({ default: m.StatsPage })));
+const SettingsPage = lazy(() => loadSettingsPage().then((m) => ({ default: m.SettingsPage })));
+const ProfilesPage = lazy(() => loadProfilesPage().then((m) => ({ default: m.ProfilesPage })));
+const MaintenancePage = lazy(() => loadMaintenancePage().then((m) => ({ default: m.MaintenancePage })));
+const ProjectsPage = lazy(() => loadProjectsPage().then((m) => ({ default: m.ProjectsPage })));
+const ProjectDetailPage = lazy(() => loadProjectDetailPage().then((m) => ({ default: m.ProjectDetailPage })));
+const FileManagerPage = lazy(() => loadFileManagerPage().then((m) => ({ default: m.FileManagerPage })));
+const OnlineSlicerPage = lazy(() => loadOnlineSlicerPage().then((m) => ({ default: m.OnlineSlicerPage })));
+const KiriMotoPage = lazy(() => loadKiriMotoPage().then((m) => ({ default: m.KiriMotoPage })));
+const ModelLibraryPage = lazy(() => loadModelLibraryPage().then((m) => ({ default: m.ModelLibraryPage })));
+const CameraPage = lazy(() => loadCameraPage().then((m) => ({ default: m.CameraPage })));
+const StreamOverlayPage = lazy(() => loadStreamOverlayPage().then((m) => ({ default: m.StreamOverlayPage })));
+const ExternalLinkPage = lazy(() => loadExternalLinkPage().then((m) => ({ default: m.ExternalLinkPage })));
+const GroupEditPage = lazy(() => loadGroupEditPage().then((m) => ({ default: m.GroupEditPage })));
+const InventoryPage = lazy(() => loadInventoryPage());
+const SystemInfoPage = lazy(() => loadSystemInfoPage().then((m) => ({ default: m.SystemInfoPage })));
+const LoginPage = lazy(() => loadLoginPage().then((m) => ({ default: m.LoginPage })));
+const SetupPage = lazy(() => loadSetupPage().then((m) => ({ default: m.SetupPage })));
+const NotificationsPage = lazy(() => loadNotificationsPage().then((m) => ({ default: m.NotificationsPage })));
+const SpoolBuddyDashboard = lazy(() => loadSpoolBuddyDashboard().then((m) => ({ default: m.SpoolBuddyDashboard })));
+const SpoolBuddyAmsPage = lazy(() => loadSpoolBuddyAmsPage().then((m) => ({ default: m.SpoolBuddyAmsPage })));
+const SpoolBuddySettingsPage = lazy(() => loadSpoolBuddySettingsPage().then((m) => ({ default: m.SpoolBuddySettingsPage })));
+const SpoolBuddyCalibrationPage = lazy(() => loadSpoolBuddyCalibrationPage().then((m) => ({ default: m.SpoolBuddyCalibrationPage })));
+const SpoolBuddyWriteTagPage = lazy(() => loadSpoolBuddyWriteTagPage().then((m) => ({ default: m.SpoolBuddyWriteTagPage })));
+const SpoolBuddyInventoryPage = lazy(() => loadSpoolBuddyInventoryPage().then((m) => ({ default: m.SpoolBuddyInventoryPage })));
+
+const backgroundPagePreloaders = [
+  loadQueuePage,
+  loadStatsPage,
+  loadMaintenancePage,
+  loadArchivesPage,
+  loadInventoryPage,
+  loadProjectsPage,
+  loadFileManagerPage,
+  loadModelLibraryPage,
+  loadSettingsPage,
+  loadProfilesPage,
+  loadNotificationsPage,
+  loadKiriMotoPage,
+];
+const BACKGROUND_PREFETCH_INITIAL_DELAY_MS = 2500;
+const BACKGROUND_PREFETCH_INTERVAL_MS = 700;
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -106,6 +152,54 @@ function SetupRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function BackgroundPagePrefetcher() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      return;
+    }
+
+    const connection = (navigator as Navigator & {
+      connection?: {
+        effectiveType?: string;
+        saveData?: boolean;
+      };
+    }).connection;
+    if (connection?.saveData || ['slow-2g', '2g', '3g'].includes(connection?.effectiveType ?? '')) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerId: number | null = null;
+    let index = 0;
+
+    const preloadNext = () => {
+      if (cancelled || index >= backgroundPagePreloaders.length) {
+        return;
+      }
+
+      const loader = backgroundPagePreloaders[index++];
+      void loader().catch(() => undefined).finally(() => {
+        if (!cancelled) {
+          timerId = window.setTimeout(preloadNext, BACKGROUND_PREFETCH_INTERVAL_MS);
+        }
+      });
+    };
+
+    timerId = window.setTimeout(preloadNext, BACKGROUND_PREFETCH_INITIAL_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [location.pathname]);
+
+  return null;
+}
+
 function App() {
   return (
     <ThemeProvider>
@@ -113,6 +207,7 @@ function App() {
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <BrowserRouter>
+              <BackgroundPagePrefetcher />
               <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
               <Routes>
                 {/* Setup page - only accessible if auth not enabled */}

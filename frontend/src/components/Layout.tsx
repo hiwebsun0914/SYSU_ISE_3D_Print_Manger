@@ -34,6 +34,7 @@ export const defaultNavItems: NavItem[] = [
   { id: 'model-library', to: '/model-library', icon: BookOpen, labelKey: 'nav.modelLibrary' },
   { id: 'kiri-moto', to: '/kiri-moto', icon: Layers, labelKey: 'nav.orcaSlicer' },
 ];
+const HOME_SECONDARY_QUERY_DELAY_MS = 1200;
 
 // Check if an ID is an external link
 function isExternalLinkId(id: string): boolean {
@@ -67,6 +68,7 @@ export function Layout() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSwitchbar, setShowSwitchbar] = useState(false);
+  const [secondarySidebarDataReady, setSecondarySidebarDataReady] = useState(() => location.pathname !== '/');
   const hasRedirected = useRef(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() =>
     sessionStorage.getItem('dismissedUpdateVersion')
@@ -81,19 +83,21 @@ export function Layout() {
   const { data: versionInfo } = useQuery({
     queryKey: ['version'],
     queryFn: api.getVersion,
+    enabled: secondarySidebarDataReady,
     staleTime: Infinity,
   });
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: api.getSettings,
+    enabled: secondarySidebarDataReady,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const { data: updateCheck } = useQuery({
     queryKey: ['updateCheck'],
     queryFn: api.checkForUpdates,
-    enabled: settings?.check_updates !== false,
+    enabled: secondarySidebarDataReady && settings !== undefined && settings.check_updates !== false,
     staleTime: 60 * 60 * 1000, // 1 hour
     refetchInterval: 60 * 60 * 1000, // Check every hour
   });
@@ -102,12 +106,14 @@ export function Layout() {
   const { data: externalLinks } = useQuery({
     queryKey: ['external-links'],
     queryFn: api.getExternalLinks,
+    enabled: secondarySidebarDataReady,
   });
 
   // Fetch smart plugs to check for switchbar items
   const { data: smartPlugs } = useQuery({
     queryKey: ['smart-plugs'],
     queryFn: api.getSmartPlugs,
+    enabled: secondarySidebarDataReady,
     staleTime: 30 * 1000, // 30 seconds
   });
 
@@ -117,6 +123,7 @@ export function Layout() {
   const { data: debugLoggingState } = useQuery({
     queryKey: ['debugLogging'],
     queryFn: supportApi.getDebugLoggingState,
+    enabled: secondarySidebarDataReady,
     staleTime: 60 * 1000, // 1 minute
     refetchInterval: 60 * 1000, // Refresh every minute
   });
@@ -125,6 +132,7 @@ export function Layout() {
   const { data: devModeWarnings } = useQuery({
     queryKey: ['developer-mode-warnings'],
     queryFn: api.getDeveloperModeWarnings,
+    enabled: secondarySidebarDataReady,
     staleTime: 10 * 1000,
     refetchInterval: 30 * 1000,
     refetchOnWindowFocus: true,
@@ -134,6 +142,7 @@ export function Layout() {
   const { data: queueItems } = useQuery({
     queryKey: ['queue', 'pending'],
     queryFn: () => api.getQueue(undefined, 'pending'),
+    enabled: secondarySidebarDataReady,
     staleTime: 5 * 1000, // 5 seconds
     refetchInterval: 5 * 1000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
@@ -144,6 +153,7 @@ export function Layout() {
   const { data: pendingUploadsData } = useQuery({
     queryKey: ['pending-uploads', 'count'],
     queryFn: pendingUploadsApi.getCount,
+    enabled: secondarySidebarDataReady,
     staleTime: 5 * 1000, // 5 seconds
     refetchInterval: 5 * 1000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
@@ -160,7 +170,7 @@ export function Layout() {
   }, [queueItems]);
 
   const printerStatusQueries = useQueries({
-    queries: queuePrinterIds.map(id => ({
+    queries: (secondarySidebarDataReady ? queuePrinterIds : []).map(id => ({
       queryKey: ['printerStatus', id],
       queryFn: () => api.getPrinterStatus(id),
       staleTime: 30 * 1000, // WebSocket keeps this warm
@@ -243,6 +253,20 @@ export function Layout() {
       }
     }
   }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      setSecondarySidebarDataReady(true);
+      return;
+    }
+
+    setSecondarySidebarDataReady(false);
+    const timerId = window.setTimeout(() => {
+      setSecondarySidebarDataReady(true);
+    }, HOME_SECONDARY_QUERY_DELAY_MS);
+
+    return () => window.clearTimeout(timerId);
+  }, [location.pathname]);
 
   useEffect(() => {
     localStorage.setItem('sidebarExpanded', String(sidebarExpanded));

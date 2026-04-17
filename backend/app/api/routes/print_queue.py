@@ -11,6 +11,8 @@ from pathlib import Path
 
 import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -77,6 +79,16 @@ def _queue_admin_access_granted(request: Request) -> bool:
     if secrets.compare_digest(password, settings.queue_admin_action_password):
         return True
     raise HTTPException(403, "Invalid queue admin password")
+
+
+def _contact_details_cache_headers(reveal_contact_details: bool) -> dict[str, str]:
+    """Prevent caching responses that reveal requester contact details."""
+    if not reveal_contact_details:
+        return {}
+    return {
+        "Cache-Control": "private, no-store",
+        "Vary": QUEUE_CONTACT_PASSWORD_HEADER,
+    }
 
 
 async def _get_next_pending_position(db: AsyncSession, printer_id: int | None) -> int:
@@ -430,7 +442,13 @@ async def list_queue(
     result = await db.execute(query)
     items = result.scalars().all()
     await _populate_missing_request_model_titles(items, db)
-    return [_enrich_response(item, reveal_contact_details=reveal_contact_details) for item in items]
+    response_items = [_enrich_response(item, reveal_contact_details=reveal_contact_details) for item in items]
+    if reveal_contact_details:
+        return JSONResponse(
+            content=jsonable_encoder(response_items),
+            headers=_contact_details_cache_headers(reveal_contact_details),
+        )
+    return response_items
 
 
 @router.post("/", response_model=PrintQueueItemResponse)
@@ -700,7 +718,14 @@ async def get_queue_item(
     if not item:
         raise HTTPException(404, "Queue item not found")
     await _populate_missing_request_model_titles([item], db)
-    return _enrich_response(item, reveal_contact_details=_contact_details_visible(request))
+    reveal_contact_details = _contact_details_visible(request)
+    response_item = _enrich_response(item, reveal_contact_details=reveal_contact_details)
+    if reveal_contact_details:
+        return JSONResponse(
+            content=jsonable_encoder(response_item),
+            headers=_contact_details_cache_headers(reveal_contact_details),
+        )
+    return response_item
 
 
 @router.patch("/{item_id}", response_model=PrintQueueItemResponse)

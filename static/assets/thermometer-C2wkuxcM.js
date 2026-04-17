@@ -1,0 +1,1 @@
+import{c as e}from"./index-n0PwcTUo.js";const o=[["path",{d:"M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4",key:"1slcih"}]],a=e("flame",o);const t=[["path",{d:"M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z",key:"17jzev"}]],m=e("thermometer",t);export{a as F,m as T};

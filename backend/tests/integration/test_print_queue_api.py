@@ -256,10 +256,60 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_list_queue_revealed_contacts_disable_caching(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        """Revealed contact details should bypass shared caching."""
+        await queue_item_factory(
+            custom_request=True,
+            requester_name="Queue User",
+            contact_email="queue.user@example.com",
+        )
+
+        response = await async_client.get(
+            "/api/v1/queue/",
+            headers={"X-Queue-Contact-Password": settings.queue_contact_view_password},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result[0]["requester_name"] == "Queue User"
+        assert result[0]["contact_email"] == "queue.user@example.com"
+        assert result[0]["contact_details_hidden"] is False
+        assert response.headers["Cache-Control"] == "private, no-store"
+        assert "X-Queue-Contact-Password" in response.headers["Vary"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_queue_item_not_found(self, async_client: AsyncClient):
         """Verify 404 for non-existent queue item."""
         response = await async_client.get("/api/v1/queue/9999")
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_queue_item_revealed_contacts_disable_caching(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        """Single-item contact reveal responses should not be cacheable."""
+        item = await queue_item_factory(
+            custom_request=True,
+            requester_name="Single User",
+            contact_email="single.user@example.com",
+        )
+
+        response = await async_client.get(
+            f"/api/v1/queue/{item.id}",
+            headers={"X-Queue-Contact-Password": settings.queue_contact_view_password},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["requester_name"] == "Single User"
+        assert result["contact_email"] == "single.user@example.com"
+        assert result["contact_details_hidden"] is False
+        assert response.headers["Cache-Control"] == "private, no-store"
+        assert "X-Queue-Contact-Password" in response.headers["Vary"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration

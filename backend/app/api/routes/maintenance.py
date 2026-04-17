@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.models.archive import PrintArchive
 from backend.app.models.maintenance import MaintenanceHistory, MaintenanceType, PrinterMaintenance
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
@@ -27,6 +28,7 @@ from backend.app.schemas.maintenance import (
 )
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import get_rod_type
+from backend.app.utils.time_sanity import estimate_archive_duration_seconds, is_suspicious_runtime_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +140,19 @@ async def get_printer_total_hours(db: AsyncSession, printer_id: int) -> float:
 
     runtime_seconds = row[0] or 0
     offset = row[1] or 0.0
+
+    if is_suspicious_runtime_seconds(runtime_seconds):
+        logger.warning(
+            "Printer %s runtime_seconds=%s looks corrupted; falling back to archive-derived runtime",
+            printer_id,
+            runtime_seconds,
+        )
+        archives_result = await db.execute(select(PrintArchive).where(PrintArchive.printer_id == printer_id))
+        runtime_seconds = sum(
+            estimate_archive_duration_seconds(archive) or 0
+            for archive in archives_result.scalars().all()
+            if archive.status != "printing"
+        )
 
     runtime_hours = runtime_seconds / 3600.0
     return runtime_hours + offset
@@ -372,11 +387,11 @@ async def _get_printer_maintenance_internal(
             is_warning = days_until <= (interval * 0.1) and not is_due
 
             # For compatibility, also set hours values (but they won't be primary)
-            hours_since = total_hours - last_performed_hours
+            hours_since = max(0.0, total_hours - last_performed_hours)
             hours_until = 0  # Not applicable for time-based
         else:
             # Print-hours based (default)
-            hours_since = total_hours - last_performed_hours
+            hours_since = max(0.0, total_hours - last_performed_hours)
             hours_until = interval - hours_since
             is_due = hours_until <= 0
             is_warning = hours_until <= (interval * 0.1) and not is_due
@@ -723,7 +738,7 @@ async def set_printer_hours(
         raise HTTPException(status_code=404, detail="Printer not found")
 
     # Get current runtime hours
-    runtime_hours = (printer.runtime_seconds or 0) / 3600.0
+    runtime_hours = await get_printer_total_hours(db, printer_id) - (printer.print_hours_offset or 0)
 
     # Calculate needed offset
     printer.print_hours_offset = max(0, total_hours - runtime_hours)
