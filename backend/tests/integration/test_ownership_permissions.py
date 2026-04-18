@@ -428,6 +428,28 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_operator_can_update_status_for_others_custom_request(
+        self, async_client: AsyncClient, auth_setup, queue_item_factory
+    ):
+        """Queue operators can advance custom request status regardless of owner."""
+        item = await queue_item_factory(
+            custom_request=True,
+            student_id="20240001",
+            requester_name="Alice Zhang",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.patch(
+            f"/api/v1/queue/{item.id}/status",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+            json={"status": "completed"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_bulk_update_skips_non_owned_items(self, async_client: AsyncClient, auth_setup, queue_item_factory):
         """Bulk update only updates items the user owns."""
         # Create items owned by different users

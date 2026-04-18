@@ -7,6 +7,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
+import { setAuthToken } from '../../api/client';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
@@ -154,6 +155,7 @@ function createCustomRequestItem(overrides: Record<string, unknown> = {}) {
 
 describe('QueuePage', () => {
   beforeEach(() => {
+    setAuthToken(null);
     // Setup MSW handlers for this test
     server.use(
       http.get('/api/v1/queue/', () => {
@@ -422,6 +424,47 @@ describe('QueuePage', () => {
       expect(
         within(pendingCard as HTMLElement).queryByLabelText('Representative request for this student')
       ).not.toBeInTheDocument();
+    });
+
+    it('allows users with queue update permission to change custom request status even when they are not the owner', async () => {
+      server.use(
+        http.get('*/api/v1/auth/status', () => {
+          return HttpResponse.json({
+            auth_enabled: true,
+            requires_setup: false,
+          });
+        }),
+        http.get('/api/v1/auth/me', () => {
+          return HttpResponse.json({
+            id: 1,
+            username: 'operator',
+            role: 'operator',
+            is_active: true,
+            is_admin: false,
+            groups: [{ id: 2, name: 'Operators' }],
+            permissions: ['queue:read', 'queue:update_own'],
+            created_at: '2024-01-01T00:00:00Z',
+          });
+        }),
+        http.get('/api/v1/queue/', () => {
+          return HttpResponse.json([
+            createCustomRequestItem({
+              id: 301,
+              created_by_id: 2,
+              created_by_username: 'another-user',
+            }),
+          ]);
+        })
+      );
+
+      setAuthToken('test-token');
+
+      render(<QueuePage />);
+
+      const requestCard = await screen.findByText('Alice Request');
+      const requestStatusSelect = within(requestCard.closest('.group') as HTMLElement).getByDisplayValue('Pending');
+
+      expect(requestStatusSelect).toBeEnabled();
     });
   });
 

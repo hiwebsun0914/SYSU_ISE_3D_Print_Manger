@@ -864,8 +864,9 @@ async def update_custom_queue_item_status(
     if not item.custom_request:
         raise HTTPException(400, "Status updates on this endpoint are only supported for custom requests")
 
-    if not can_modify_all and item.created_by_id != user.id:
-        raise HTTPException(403, "You can only update your own queue items")
+    # Custom request status changes are operational workflow actions.
+    # Any user with queue update permission can move them through the queue,
+    # even when the request was created by another user or predates ownership tracking.
 
     previous_status = item.status
     now = datetime.now(timezone.utc)

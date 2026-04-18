@@ -592,6 +592,7 @@ function SortableQueueItem({
   onToggleSelect,
   isRequestSearchRepresentative = false,
   hasPermission,
+  hasAnyPermission,
   canModify,
   printerState,
   t,
@@ -611,6 +612,7 @@ function SortableQueueItem({
   onToggleSelect?: () => void;
   isRequestSearchRepresentative?: boolean;
   hasPermission: (permission: Permission) => boolean;
+  hasAnyPermission: (...permissions: Permission[]) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
   printerState?: string | null;
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -657,6 +659,9 @@ function SortableQueueItem({
   const isMobileSelectable = isPending && !item.custom_request && !!onToggleSelect;
   const displayName = getQueueItemDisplayName(item, t('queue.request.defaultTitle'));
   const canEdit = canModify('queue', 'update', item.created_by_id);
+  const canUpdateCustomRequestStatus = item.custom_request
+    ? hasAnyPermission('queue:update_own', 'queue:update_all')
+    : canEdit;
   const canRequestAdminDelete = hasPermission('queue:read');
   const canEditCustomRequest = canEdit && !item.contact_details_hidden;
   const customStatusValue = item.status === 'printing' || item.status === 'completed' ? item.status : 'pending';
@@ -949,8 +954,8 @@ function SortableQueueItem({
                 <select
                   value={customStatusValue}
                   onChange={(e) => onSetCustomStatus?.(e.target.value as 'pending' | 'printing' | 'completed')}
-                  disabled={!canEdit || isUpdatingStatus}
-                  title={!canEdit ? t('queue.permissions.noStatusChange') : t('queue.request.status')}
+                  disabled={!canUpdateCustomRequestStatus || isUpdatingStatus}
+                  title={!canUpdateCustomRequestStatus ? t('queue.permissions.noStatusChange') : t('queue.request.status')}
                   className="px-2 py-1.5 text-xs sm:text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
                 >
                   <option value="pending">{t('queue.status.pending')}</option>
@@ -1784,6 +1789,7 @@ export function QueuePage() {
                       isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                       isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                       hasPermission={hasPermission}
+                      hasAnyPermission={hasAnyPermission}
                       canModify={canModify}
                       printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
                       t={t}
@@ -1905,6 +1911,7 @@ export function QueuePage() {
                         onToggleSelect={() => handleToggleSelect(item.id)}
                         isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                         hasPermission={hasPermission}
+                        hasAnyPermission={hasAnyPermission}
                         canModify={canModify}
                         t={t}
                       />
@@ -1964,6 +1971,7 @@ export function QueuePage() {
                     isUpdatingStatus={updateRequestStatusMutation.isPending && updateRequestStatusMutation.variables?.id === item.id}
                     isRequestSearchRepresentative={requestSearchRepresentativeIds.has(item.id)}
                     hasPermission={hasPermission}
+                    hasAnyPermission={hasAnyPermission}
                     canModify={canModify}
                     t={t}
                   />
