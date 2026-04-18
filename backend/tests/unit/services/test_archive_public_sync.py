@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, patch
+import zipfile
 
 import pytest
 
@@ -80,3 +81,61 @@ async def test_delete_archive_removes_all_public_artifacts(db_session, tmp_path,
         archive.f3d_path,
     ]
     assert not record_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_populate_archive_from_3mf_backfills_placeholder_archive(db_session, tmp_path, monkeypatch):
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    monkeypatch.setattr(settings, "archive_dir", archive_dir)
+
+    placeholder = PrintArchive(
+        printer_id=None,
+        filename="missing-print.gcode",
+        print_name="Missing Print",
+        file_path="",
+        file_size=0,
+        status="completed",
+        extra_data={"no_3mf_available": True, "original_subtask": "missing-print"},
+    )
+    db_session.add(placeholder)
+    await db_session.commit()
+    await db_session.refresh(placeholder)
+
+    source_file = tmp_path / "recovered-print.3mf"
+    with zipfile.ZipFile(source_file, "w") as zf:
+        zf.writestr(
+            "Metadata/slice_info.config",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <config>
+              <plate>
+                <metadata key="prediction" value="3600" />
+                <metadata key="weight" value="42.5" />
+                <object identify_id="1" name="Part A" skipped="false" />
+                <filament id="1" type="PLA" color="#FFFFFF" used_g="42.5" />
+              </plate>
+            </config>
+            """,
+        )
+        zf.writestr("Metadata/thumbnail.png", b"fake-png-data")
+
+    with patch("backend.app.services.archive.sync_public_file", new=AsyncMock(return_value=True)) as mock_sync:
+        service = ArchiveService(db_session)
+        archive = await service.populate_archive_from_3mf(
+            placeholder.id,
+            source_file,
+            print_data={"filename": "missing-print.gcode"},
+            original_filename="recovered-print.gcode.3mf",
+        )
+
+    assert archive is not None
+    assert archive.file_path.startswith("archive/unassigned/")
+    assert archive.file_size > 0
+    assert archive.thumbnail_path is not None
+    assert archive.filename == "recovered-print.gcode.3mf"
+    assert archive.print_time_seconds == 3600
+    assert archive.filament_used_grams == 42.5
+    assert archive.extra_data is not None
+    assert archive.extra_data.get("no_3mf_available") is None
+    assert mock_sync.await_count == 2

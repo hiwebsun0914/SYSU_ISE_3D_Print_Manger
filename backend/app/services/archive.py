@@ -764,6 +764,86 @@ class ArchiveService:
         self.db = db
 
     @staticmethod
+    def _extract_plate_number(print_data: dict | None) -> int | None:
+        """Extract the selected plate number from MQTT print data when available."""
+        if not print_data:
+            return None
+
+        filename = print_data.get("filename", "")
+        match = re.search(r"plate_(\d+)", filename)
+        if match:
+            return int(match.group(1))
+        return None
+
+    async def _calculate_archive_cost(self, metadata: dict) -> float | None:
+        """Calculate filament cost using configured filament pricing."""
+        cost = None
+        filament_grams = metadata.get("filament_used_grams")
+        filament_type = metadata.get("filament_type")
+        if filament_grams and filament_type:
+            primary_type = filament_type.split(",")[0].strip()
+            filament_result = await self.db.execute(select(Filament).where(Filament.type == primary_type).limit(1))
+            filament = filament_result.scalar_one_or_none()
+            if filament:
+                cost = round((filament_grams / 1000) * filament.cost_per_kg, 2)
+            else:
+                from backend.app.api.routes.settings import get_setting
+
+                default_cost_setting = await get_setting(self.db, "default_filament_cost")
+                default_cost_per_kg = float(default_cost_setting) if default_cost_setting else 25.0
+                cost = round((filament_grams / 1000) * default_cost_per_kg, 2)
+        return cost
+
+    @staticmethod
+    def _calculate_archive_quantity(metadata: dict) -> int:
+        """Estimate the part count from printable objects metadata."""
+        quantity = 1
+        printable_objects = metadata.get("printable_objects")
+        if printable_objects and isinstance(printable_objects, dict):
+            quantity = len(printable_objects)
+            logger.debug("Auto-detected %s parts from 3MF printable objects", quantity)
+        return quantity
+
+    async def _store_archive_file(
+        self,
+        archive_dir: Path,
+        source_file: Path,
+        print_data: dict | None = None,
+    ) -> tuple[str, int, str | None, str, dict]:
+        """Copy a 3MF into an archive directory and extract its metadata."""
+        archive_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_file = archive_dir / source_file.name
+        shutil.copy2(source_file, dest_file)
+        archive_relative_path = str(dest_file.relative_to(settings.base_dir))
+        await sync_public_file(archive_relative_path, dest_file)
+
+        content_hash = self.compute_file_hash(dest_file)
+        plate_number = self._extract_plate_number(print_data)
+        parser = ThreeMFParser(dest_file, plate_number=plate_number)
+        metadata = parser.parse()
+
+        thumbnail_path = None
+        if "_thumbnail_data" in metadata:
+            thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
+            thumb_file.write_bytes(metadata["_thumbnail_data"])
+            thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
+            await sync_public_file(thumbnail_path, thumb_file)
+            del metadata["_thumbnail_data"]
+            del metadata["_thumbnail_ext"]
+
+        if print_data:
+            metadata["_print_data"] = print_data
+
+        return (
+            archive_relative_path,
+            dest_file.stat().st_size,
+            thumbnail_path,
+            content_hash,
+            metadata,
+        )
+
+    @staticmethod
     def compute_file_hash(file_path: Path) -> str:
         """Compute SHA256 hash of a file for duplicate detection."""
         sha256 = hashlib.sha256()
@@ -917,82 +997,26 @@ class ArchiveService:
         # Use "unassigned" folder for archives without a printer
         printer_folder = str(printer_id) if printer_id is not None else "unassigned"
         archive_dir = settings.archive_dir / printer_folder / archive_name
-        archive_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy 3MF file
-        dest_file = archive_dir / source_file.name
-        shutil.copy2(source_file, dest_file)
-        archive_relative_path = str(dest_file.relative_to(settings.base_dir))
-        await sync_public_file(archive_relative_path, dest_file)
-
-        # Compute content hash for duplicate detection
-        content_hash = self.compute_file_hash(dest_file)
-
-        # Extract plate number from filename (e.g., "plate_5" from "/data/Metadata/plate_5.gcode")
-        plate_number = None
-        if print_data:
-            filename = print_data.get("filename", "")
-            match = re.search(r"plate_(\d+)", filename)
-            if match:
-                plate_number = int(match.group(1))
-
-        # Parse 3MF metadata
-        parser = ThreeMFParser(dest_file, plate_number=plate_number)
-        metadata = parser.parse()
-
-        # Save thumbnail if present
-        thumbnail_path = None
-        if "_thumbnail_data" in metadata:
-            thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
-            thumb_file.write_bytes(metadata["_thumbnail_data"])
-            thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
-            await sync_public_file(thumbnail_path, thumb_file)
-            del metadata["_thumbnail_data"]
-            del metadata["_thumbnail_ext"]
-
-        # Merge with print data from MQTT
-        if print_data:
-            metadata["_print_data"] = print_data
+        archive_relative_path, file_size, thumbnail_path, content_hash, metadata = await self._store_archive_file(
+            archive_dir,
+            source_file,
+            print_data=print_data,
+        )
 
         # Determine status and timestamps
         status = print_data.get("status", "completed") if print_data else "archived"
         started_at = datetime.now(timezone.utc) if status == "printing" else None
         completed_at = datetime.now(timezone.utc) if status in ("completed", "failed", "archived") else None
 
-        # Calculate cost based on filament usage and type
-        cost = None
-        filament_grams = metadata.get("filament_used_grams")
-        filament_type = metadata.get("filament_type")
-        if filament_grams and filament_type:
-            # For multi-material prints, use the first filament type for cost calculation
-            primary_type = filament_type.split(",")[0].strip()
-            # Look up filament cost_per_kg from database
-            filament_result = await self.db.execute(select(Filament).where(Filament.type == primary_type).limit(1))
-            filament = filament_result.scalar_one_or_none()
-            if filament:
-                cost = round((filament_grams / 1000) * filament.cost_per_kg, 2)
-            else:
-                # Use default filament cost from settings
-                from backend.app.api.routes.settings import get_setting
-
-                default_cost_setting = await get_setting(self.db, "default_filament_cost")
-                default_cost_per_kg = float(default_cost_setting) if default_cost_setting else 25.0
-                cost = round((filament_grams / 1000) * default_cost_per_kg, 2)
-
-        # Calculate quantity from printable objects count
-        # printable_objects is a dict of {identify_id: name} for non-skipped objects
-        quantity = 1  # Default to 1
-        printable_objects = metadata.get("printable_objects")
-        if printable_objects and isinstance(printable_objects, dict):
-            quantity = len(printable_objects)
-            logger.debug("Auto-detected %s parts from 3MF printable objects", quantity)
+        cost = await self._calculate_archive_cost(metadata)
+        quantity = self._calculate_archive_quantity(metadata)
 
         # Create archive record
         archive = PrintArchive(
             printer_id=printer_id,
             filename=original_filename or source_file.name,
             file_path=archive_relative_path,
-            file_size=dest_file.stat().st_size,
+            file_size=file_size,
             content_hash=content_hash,
             thumbnail_path=thumbnail_path,
             print_name=metadata.get("print_name") or display_stem,
@@ -1021,6 +1045,64 @@ class ArchiveService:
         await self.db.commit()
         await self.db.refresh(archive)
 
+        return archive
+
+    async def populate_archive_from_3mf(
+        self,
+        archive_id: int,
+        source_file: Path,
+        print_data: dict | None = None,
+        original_filename: str | None = None,
+    ) -> PrintArchive | None:
+        """Backfill an existing archive with a recovered 3MF and extracted metadata."""
+        archive = await self.get_archive(archive_id)
+        if not archive:
+            return None
+
+        display_name = original_filename or archive.filename or source_file.name
+        display_stem = Path(display_name).stem or f"archive_{archive.id}"
+
+        if archive.file_path and archive.file_path.strip():
+            archive_dir = (settings.base_dir / archive.file_path).parent
+        else:
+            timestamp = (archive.created_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
+            printer_folder = str(archive.printer_id) if archive.printer_id is not None else "unassigned"
+            archive_dir = settings.archive_dir / printer_folder / f"{timestamp}_{display_stem}_{archive.id}"
+
+        archive_relative_path, file_size, thumbnail_path, content_hash, metadata = await self._store_archive_file(
+            archive_dir,
+            source_file,
+            print_data=print_data,
+        )
+
+        merged_extra_data = dict(archive.extra_data or {})
+        merged_extra_data.update(metadata)
+        merged_extra_data.pop("no_3mf_available", None)
+
+        archive.filename = original_filename or archive.filename or source_file.name
+        archive.file_path = archive_relative_path
+        archive.file_size = file_size
+        archive.content_hash = content_hash
+        archive.thumbnail_path = thumbnail_path or archive.thumbnail_path
+        archive.print_name = metadata.get("print_name") or archive.print_name or display_stem
+        archive.print_time_seconds = metadata.get("print_time_seconds") or archive.print_time_seconds
+        archive.filament_used_grams = metadata.get("filament_used_grams") or archive.filament_used_grams
+        archive.filament_type = metadata.get("filament_type") or archive.filament_type
+        archive.filament_color = metadata.get("filament_color") or archive.filament_color
+        archive.layer_height = metadata.get("layer_height") or archive.layer_height
+        archive.total_layers = metadata.get("total_layers") or archive.total_layers
+        archive.nozzle_diameter = metadata.get("nozzle_diameter") or archive.nozzle_diameter
+        archive.bed_temperature = metadata.get("bed_temperature") or archive.bed_temperature
+        archive.nozzle_temperature = metadata.get("nozzle_temperature") or archive.nozzle_temperature
+        archive.sliced_for_model = metadata.get("sliced_for_model") or archive.sliced_for_model
+        archive.makerworld_url = metadata.get("makerworld_url") or archive.makerworld_url
+        archive.designer = metadata.get("designer") or archive.designer
+        archive.cost = await self._calculate_archive_cost(merged_extra_data)
+        archive.quantity = self._calculate_archive_quantity(merged_extra_data)
+        archive.extra_data = merged_extra_data
+
+        await self.db.commit()
+        await self.db.refresh(archive)
         return archive
 
     async def get_archive(self, archive_id: int) -> PrintArchive | None:
