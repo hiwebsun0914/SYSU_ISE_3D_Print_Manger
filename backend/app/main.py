@@ -4497,7 +4497,10 @@ async def serve_frontend():
     """Serve the React frontend."""
     index_file = app_settings.static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {
         "message": "Bambuddy API",
         "docs": "/docs",
@@ -4516,7 +4519,11 @@ async def serve_manifest():
     """Serve PWA manifest."""
     manifest_file = app_settings.static_dir / "manifest.json"
     if manifest_file.exists():
-        return FileResponse(manifest_file, media_type="application/manifest+json")
+        return FileResponse(
+            manifest_file,
+            media_type="application/manifest+json",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {"error": "Manifest not found"}
 
 
@@ -4545,6 +4552,9 @@ async def serve_spa(full_path: str):
 
     index_file = app_settings.static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     return {"error": "Frontend not built"}
