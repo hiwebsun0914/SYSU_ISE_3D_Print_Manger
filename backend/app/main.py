@@ -3883,28 +3883,31 @@ def stop_public_archive_backfill() -> None:
 _missing_archive_3mf_backfill_task: asyncio.Task | None = None
 MISSING_ARCHIVE_3MF_BACKFILL_INTERVAL = 900
 MISSING_ARCHIVE_3MF_BACKFILL_RECENT_LIMIT = 25
-MISSING_ARCHIVE_3MF_BACKFILL_MAX_AGE = timedelta(days=7)
 
 
 async def _missing_archive_3mf_backfill_loop():
-    """Retry downloading 3MF files for recent placeholder archives."""
+    """Retry downloading 3MF files for placeholder archives."""
     logger = logging.getLogger(__name__)
+    first_run = True
 
     while True:
         recovered = 0
         attempted = 0
+        scanned = 0
         try:
             async with async_session() as db:
-                cutoff = datetime.now(timezone.utc) - MISSING_ARCHIVE_3MF_BACKFILL_MAX_AGE
-                result = await db.execute(
+                query = (
                     select(PrintArchive)
                     .where(PrintArchive.printer_id.is_not(None))
-                    .where(PrintArchive.created_at >= cutoff)
                     .where(or_(PrintArchive.file_path.is_(None), PrintArchive.file_path == ""))
                     .order_by(PrintArchive.created_at.desc())
-                    .limit(MISSING_ARCHIVE_3MF_BACKFILL_RECENT_LIMIT)
                 )
+                if not first_run:
+                    query = query.limit(MISSING_ARCHIVE_3MF_BACKFILL_RECENT_LIMIT)
+
+                result = await db.execute(query)
                 archives = list(result.scalars().all())
+                scanned = len(archives)
                 service = ArchiveService(db)
 
                 for archive in archives:
@@ -3948,9 +3951,10 @@ async def _missing_archive_3mf_backfill_loop():
                         if recovery_temp_path and recovery_temp_path.exists():
                             recovery_temp_path.unlink(missing_ok=True)
 
-            if recovered:
+            if scanned:
                 logger.info(
-                    "Missing archive 3MF backfill attempted=%s recovered=%s",
+                    "Missing archive 3MF backfill scanned=%s attempted=%s recovered=%s",
+                    scanned,
                     attempted,
                     recovered,
                 )
@@ -3959,6 +3963,7 @@ async def _missing_archive_3mf_backfill_loop():
         except Exception as e:
             logger.warning("Missing archive 3MF backfill failed: %s", e)
 
+        first_run = False
         await asyncio.sleep(MISSING_ARCHIVE_3MF_BACKFILL_INTERVAL)
 
 
