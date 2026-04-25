@@ -1,5 +1,7 @@
 """Integration tests for Print Queue API endpoints."""
 
+import asyncio
+
 import pytest
 from httpx import AsyncClient
 
@@ -345,6 +347,42 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_delete_custom_request_soft_deletes_row(self, async_client: AsyncClient, db_session):
+        """Custom requests should be hidden from the queue but kept for sync reconciliation."""
+        from backend.app.models.print_queue import PrintQueueItem
+
+        item = PrintQueueItem(
+            custom_request=True,
+            student_id="22330003",
+            requester_name="Delete Me",
+            contact_email="delete@example.com",
+            request_model_url="https://makerworld.com.cn/zh/models/delete-me",
+            request_notes="soft delete",
+            position=1,
+            status="pending",
+            manual_start=True,
+        )
+        db_session.add(item)
+        await db_session.commit()
+        await db_session.refresh(item)
+
+        response = await async_client.delete(
+            f"/api/v1/queue/{item.id}",
+            headers={"X-Queue-Admin-Password": settings.queue_admin_action_password},
+        )
+        assert response.status_code == 200
+        assert response.json()["message"] == "Queue item deleted"
+
+        list_response = await async_client.get("/api/v1/queue/")
+        assert list_response.status_code == 200
+        assert all(queue_item["id"] != item.id for queue_item in list_response.json())
+
+        await db_session.refresh(item)
+        assert item.deleted_at is not None
+        assert item.status == "cancelled"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_delete_queue_item_not_found(self, async_client: AsyncClient):
         """Verify 404 for deleting non-existent queue item."""
         response = await async_client.delete(
@@ -381,6 +419,33 @@ class TestPrintQueueAPI:
             "contact_email": "student@example.com",
             "request_model_url": "https://makerworld.com.cn/zh/models/658549-bi-ji-ben-dian-nao-zhi-jia-laptop-stand",
             "request_notes": "Please print this one",
+        }
+        response = await async_client.post("/api/v1/queue/", json=data)
+
+        assert response.status_code == 200
+        assert response.json()["request_model_title"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_add_custom_request_times_out_title_resolution(
+        self, async_client: AsyncClient, monkeypatch, db_session
+    ):
+        """Verify slow MakerWorld title resolution does not block queue creation."""
+
+        async def _mock_resolve(_: str) -> str:
+            await asyncio.sleep(0.05)
+            return "Should not be returned"
+
+        monkeypatch.setattr("backend.app.api.routes.print_queue.resolve_makerworld_model_title", _mock_resolve)
+        monkeypatch.setattr("backend.app.api.routes.print_queue.MAKERWORLD_TITLE_RESOLUTION_TIMEOUT_SECONDS", 0.01)
+
+        data = {
+            "custom_request": True,
+            "student_id": "22330009",
+            "requester_name": "Slow Title Student",
+            "contact_email": "slow@example.com",
+            "request_model_url": "https://makerworld.com.cn/zh/models/658549-bi-ji-ben-dian-nao-zhi-jia-laptop-stand",
+            "request_notes": "should still save quickly",
         }
         response = await async_client.post("/api/v1/queue/", json=data)
 

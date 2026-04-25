@@ -1,0 +1,23 @@
+[Unit]
+Description=Bambuddy reverse SSH tunnel to public proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ssh -NT \
+  -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=yes \
+  -i /root/.ssh/bambuddy_reverse_tunnel \
+  -L 127.0.0.1:18001:127.0.0.1:18001 \
+  -R 127.0.0.1:18000:127.0.0.1:8000 \
+  bambuddy-tunnel@43.160.198.64
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

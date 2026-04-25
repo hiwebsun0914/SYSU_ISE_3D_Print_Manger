@@ -1,667 +1,190 @@
-<p align="center">
-  <img src="static/img/SYSU.png" alt="SYSU Logo" width="300">
-</p>
-
-<h1 align="center">Bambuddy</h1>
-
-<p align="center">
-  <strong>Self-hosted print archive and management system for Bambu Lab 3D printers</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/maziggy/bambuddy/releases"><img src="https://img.shields.io/github/v/release/maziggy/bambuddy?style=flat-square&color=blue" alt="Release"></a>
-  <img src="https://github.com/maziggy/bambuddy/actions/workflows/ci.yml/badge.svg?branch=main">
-  <img src="https://github.com/maziggy/bambuddy/actions/workflows/github-code-scanning/codeql/badge.svg">
-  <img src="https://github.com/maziggy/bambuddy/actions/workflows/security.yml/badge.svg">
-  <a href="https://github.com/maziggy/bambuddy/blob/main/LICENSE"><img src="https://img.shields.io/github/license/maziggy/bambuddy?style=flat-square" alt="License"></a>
-  <a href="https://github.com/maziggy/bambuddy/stargazers"><img src="https://img.shields.io/github/stars/maziggy/bambuddy?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/maziggy/bambuddy/issues"><img src="https://img.shields.io/github/issues/maziggy/bambuddy?style=flat-square" alt="Issues"></a>
-  <a href="https://discord.gg/aFS3ZfScHM"><img src="https://img.shields.io/discord/1461241694715645994?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord"></a>
-  <a href="https://ko-fi.com/maziggy"><img src="https://img.shields.io/badge/Ko--fi-Support-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi" target=_blank></a>
-</p>
-
-<p align="center">
-  <a href="#-features">Features</a> •
-  <a href="#-screenshots">Screenshots</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="http://wiki.bambuddy.cool">Documentation</a> •
-  <a href="https://discord.gg/aFS3ZfScHM">Discord</a> •
-  <a href="#-contributing">Contributing</a>
-</p>
-
-<p align="center">
-  Chinese README: <a href="./README.zh-CN.md">README.zh-CN.md</a>
-</p>
-
----
-
-## 🌐 NEW: Remote Printing with Proxy Mode
-
-<p align="center">
-  <img src="docs/images/proxy-mode-diagram.png" alt="Proxy Mode Architecture" width="800">
-</p>
-
-**Print from anywhere in the world** — Bambuddy's new Proxy Mode acts as a secure relay between your slicer and printer:
-
-- 🔒 **End-to-end TLS encryption** — FTP, file transfer, and camera are transparently proxied with the printer's real TLS certificate
-- 🛡️ **VPN recommended** — Use Tailscale/WireGuard for full data encryption ([details](https://wiki.bambuddy.cool/features/virtual-printer/))
-- 🌍 **No cloud dependency** — Direct connection through your own Bambuddy server
-- 🔑 **Uses printer's access code** — No additional credentials needed
-- ⚡ **Full-speed printing** — Transparent TCP proxy, only MQTT is decrypted for IP rewriting
-
-Perfect for remote print farms, traveling makers, or accessing your home printer from work.
-
-👉 **[Setup Guide →](https://wiki.bambuddy.cool/features/virtual-printer/#proxy-mode-new-in-017)**
-
----
-
-## Why Bambuddy?
-
-- **Own your data** — All print history stored locally, no cloud dependency
-- **Works offline** — Uses Developer Mode for direct printer control via local network
-- **Full automation** — Schedule prints, auto power-off, get notified when done
-- **Multi-printer support** — Manage your entire print farm from one interface
-
----
-
-## ✨ Features
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 📦 Print Archive
-- Automatic 3MF archiving with metadata
-- 3D model preview (Three.js)
-- Duplicate detection & full-text search
-- Photo attachments & failure analysis
-- Timelapse editor (trim, speed, music) with automatic AVI-to-MP4 conversion for P1-series printers, manual upload & remove
-- Re-print to any connected printer with AMS mapping (auto-match or manual slot selection, multi-plate support, nozzle-aware matching for dual-nozzle H2D/H2D Pro)
-- Plate thumbnail browsing for multi-plate archives (hover to navigate between plates)
-- Archive comparison (side-by-side diff)
-- Tag management (rename/delete across all archives)
-- **Print Log** — Chronological table view of all print activity with columns for date/time, print name, printer, user, status, duration, and filament. Filterable by search, printer, user, status, and date range. Pagination with configurable page size. Clear button removes log entries without affecting archives.
-
-### 📊 Monitoring & Control
-- Real-time printer status via WebSocket
-- Live camera streaming (MJPEG) & snapshots with multi-viewer support
-- **Streaming overlay for OBS** - Embeddable page with camera + status for live streaming (`/overlay/:printerId`), configurable FPS (`?fps=30`), status-only mode (`?camera=false`)
-- External camera support (MJPEG, RTSP, HTTP snapshot, USB/V4L2) with layer-based timelapse
-- **Build plate empty detection** - Auto-pause print if objects detected on plate (multi-reference calibration, ROI adjustment)
-- Fan status monitoring (part cooling, auxiliary, chamber)
-- Printer control (stop, pause, resume, chamber light, print speed)
-- Resizable printer cards (S/M/L/XL)
-- Skip objects during print
-- AMS slot RFID re-read
-- AMS slot configuration (model-filtered presets, K profiles, color picker, pre-population for configured slots)
-- AMS info card (hover for serial number, firmware version) with custom friendly names that persist across printers
-- **AMS remote drying** — Start, monitor, and stop drying sessions for AMS 2 Pro and AMS-HT directly from the Printers page with filament-based temperature/duration presets, optional spool rotation; automatic PSU detection and HMS power error reporting
-- **Queue auto-drying** — Automatically dry filament between scheduled prints when humidity exceeds threshold; configurable presets per filament type, optional blocking mode
-- **Ambient drying** — Automatically keep filament dry on idle printers based on humidity, regardless of whether prints are queued
-- Configurable drying presets per filament type (temperature & duration for AMS 2 Pro and AMS-HT)
-- Dual external spool support for H2D (Ext-L / Ext-R)
-- HMS error monitoring with history and clear errors
-- Print success rates & trends
-- Filament usage tracking
-- Cost analytics & failure analysis
-- CSV/Excel export
-
-### ⏰ Scheduling & Automation
-- **Background print dispatch** — FTP uploads and print-start commands run in the background with real-time WebSocket progress toasts (per-job upload bars, status badges, cancel button)
-- Print queue with drag-and-drop
-- Multi-printer selection (send to multiple printers at once)
-- Model-based queue assignment (send to "any X1C" for load balancing) with location filtering
-- Filament override for model-based queue (swap filament colors/types before scheduling)
-- Filament validation (only assign to printers with required filaments)
-- Per-printer AMS mapping (individual slot configuration for print farms)
-- Scheduled prints (date/time)
-- Queue Only mode (stage without auto-start)
-- Clear plate confirmation between queued prints
-- Smart plug integration (Tasmota, Home Assistant, MQTT)
-- MQTT smart plugs: Subscribe to Zigbee2MQTT, Shelly, or any MQTT topic for energy monitoring
-- Energy consumption tracking (per-print kWh and cost)
-- HA energy sensor support (for plugs with separate power/energy sensors)
-- Auto power-on before print
-- Auto power-off after cooldown
-
-### 📁 File Manager (Library)
-- Upload and organize sliced files (3MF, gcode, STL)
-- **Online BambuStudio / Kiri:Moto slicing** - Open BambuStudio or Kiri:Moto in the browser, tune parameters, then bring the generated files back into the library
-- **External folder mounting** - Mount host directories (NAS, USB, network shares) without copying files
-- **STL thumbnail generation** - Auto-generate previews for STL files on upload or batch generate for existing files
-- ZIP file extraction with folder structure preservation
-- Option to create folder from ZIP filename
-- Folder structure with drag-and-drop
-- Rename files and folders via context menu
-- Print directly to any printer with full options
-- Add to queue without creating archive upfront
-- Plate selection for multi-plate 3MF files
-- Duplicate detection via file hash
-- Mobile-friendly with always-visible action buttons
-
-### 📁 Projects
-- Group related prints (e.g., "Voron Build")
-- Track plates (print jobs) and parts separately
-- Auto-detect parts count from 3MF files
-- Color-coded project badges
-- Bulk assign archives via multi-select toolbar
-- Import/Export projects as ZIP (includes files) or JSON
-
-</td>
-<td width="50%" valign="top">
-
-### 🔔 Notifications
-- WhatsApp, Telegram, Discord
-- Email, Pushover, ntfy
-- Home Assistant persistent notifications
-- Custom webhooks
-- Quiet hours & daily digest
-- Customizable message templates with per-filament usage details
-- Print finish photo URL in notifications
-- Filament usage and progress in failed/cancelled print notifications
-- **Missing spool assignment warning** — Toast and push notification when a print starts with unassigned AMS trays
-- HMS error alerts (AMS, nozzle, etc.)
-- Build plate detection alerts
-- First layer complete alert (with camera snapshot)
-- Bed cooled alerts (configurable threshold)
-- Queue events (waiting, skipped, failed)
-
-### 🧵 Spool Inventory
-- Built-in spool inventory with AMS slot assignment, usage tracking, and remaining weight management
-- Automatic filament consumption tracking: 3MF slicer estimates for all spools (primary), AMS remain% delta as fallback
-- Mid-print spool reassignment support: uses live assignment if changed during print, snapshot otherwise
-- Per-layer gcode accuracy for partial prints (failed/cancelled), with linear scaling fallback
-- **Per-spool cost tracking** — Set cost/kg on each spool; costs are automatically calculated at print completion and aggregated to archives. Print modal shows real-time cost preview. Configurable default cost and currency in Settings.
-- **Bulk spool addition** — Add multiple identical spools at once (quantity 1–100) with a single form submission. Quick Add mode for stock spools that only need material, color, and weight.
-- Spool catalog, color catalog, PA profile matching, and low-stock alerts
-
-### 🔧 Integrations
-- [Spoolman](https://github.com/Donkie/Spoolman) filament sync with per-filament usage tracking and fill level display
-- MQTT publishing for Home Assistant, Node-RED, etc.
-- **Prometheus metrics** - Export printer telemetry for Grafana dashboards
-- Bambu Cloud profile management
-- K-profiles (pressure advance)
-- **GitHub backup** - Schedule automatic backups of cloud profiles, k profiles and settings to GitHub
-- External sidebar links
-- Webhooks & API keys
-- Interactive API browser with live testing
-
-### 🖨️ Virtual Printer & Remote Printing
-- **🌐 Proxy Mode (NEW!)** — Print remotely from anywhere via secure TLS relay
-- Emulates a Bambu Lab printer on your network
-- Send prints directly from Bambu Studio/Orca Slicer
-- Configurable printer model (X1C, P1S, A1, H2D, etc.)
-- Archive mode, Review mode, Queue mode, or Proxy mode
-- SSDP discovery (same LAN) or manual IP entry (VPN/remote)
-- Network interface override for multi-NIC/Docker/VPN setups
-- Secure TLS/MQTT/FTP communication
-
-### 🛠️ Maintenance & Support
-- Maintenance scheduling & tracking
-- Interval reminders (hours/days)
-- Print time accuracy stats
-- File manager for printer storage
-- Firmware update helper with version badge (LAN-only printers)
-- Debug logging toggle with live indicator
-- Live application log viewer with filtering
-- Support bundle generator with comprehensive diagnostics (privacy-filtered)
-- **In-app bug reporting** — Submit bug reports directly from the UI with optional screenshot (upload, paste, or drag & drop), interactive debug log capture (start logging, reproduce at your own pace, stop & submit), and system info. Reports create GitHub issues via a secure relay. Privacy-first: all logs are sanitized and sensitive data (IPs, serials, credentials) is never included.
-
-### 🔒 Optional Authentication
-- Enable/disable authentication any time
-- Group-based permissions (80+ granular permissions)
-- Default groups: Administrators, Operators, Viewers
-- JWT tokens with secure password hashing
-- Comprehensive API protection (200+ endpoints secured)
-- User management (create, edit, delete, groups)
-- User activity tracking (who uploaded archives, library files, queued prints, started prints)
-- **Per-user Bambu Cloud accounts** — Each user has their own independent Cloud login for profiles
-- **Advanced Auth via Email** — SMTP integration for automated user onboarding and self-service password resets
-- Admin creates users with email — system sends secure random password automatically
-- Users can reset their own password from the login screen (no admin needed)
-- Customizable email templates (welcome email, password reset)
-- **Per-user email notifications** — Users receive email alerts for their own print jobs (start, complete, failed, stopped) with individual toggle controls
-
-</td>
-</tr>
-</table>
-
-**Plus:** Configurable slicer workflow (Bambu Studio / Kiri:Moto) • Customizable themes (style, background, accent) • Mobile responsive • Keyboard shortcuts • Multi-language (EN/DE/JA/IT) • Auto updates • Database backup/restore • System info dashboard
-
----
-
-## 🎬 Demo
-
-<p align="center">
-  <a href="https://youtu.be/bmq2Z0lEXeo">
-    <img src="https://img.youtube.com/vi/bmq2Z0lEXeo/maxresdefault.jpg" alt="Bambuddy Demo Video" width="800">
-  </a>
-  <br><em>Click to watch the demo on YouTube</em>
-</p>
-
----
-
-## 📸 Screenshots
-
-<details>
-<summary><strong>Click to expand screenshots</strong></summary>
-
-<p align="center">
-  <img src="docs/screenshots/printers.png" alt="Printers" width="800">
-  <br><em>Real-time printer monitoring with AMS status</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/archives.png" alt="Archives" width="800">
-  <br><em>Print archive with 3D preview and project assignment</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/reprint_ams_mapping.png" alt="Reprint AMS Mapping" width="800">
-  <br><em>Re-print with AMS filament mapping preview</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/edit-timelapse.png" alt="Timelapse Editor" width="800">
-  <br><em>Built-in timelapse editor with trim, speed, and music</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/projects.png" alt="Projects" width="800">
-  <br><em>Group related prints into projects</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/project-detail-1.png" alt="Project Detail" width="800">
-  <br><em>Project detail view with assigned archives</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/project-detail-2.png" alt="Project Detail Timeline" width="800">
-  <br><em>Project timeline and print history</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/print-queue.png" alt="Queue" width="800">
-  <br><em>Print scheduling and queue management</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/schedule-print.png" alt="Schedule Print" width="800">
-  <br><em>Schedule prints for specific date and time</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/statistics.png" alt="Statistics" width="800">
-  <br><em>Customizable statistics dashboard</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/maintenance-1.png" alt="Maintenance" width="800">
-  <br><em>Maintenance tracking per printer</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/maintenance-2.png" alt="Maintenance Settings" width="800">
-  <br><em>Configure maintenance types and intervals</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/cloud_profiles-1.png" alt="Cloud Profiles" width="800">
-  <br><em>Bambu Cloud filament profiles</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/cloud_profiles-2.png" alt="Cloud Profiles Edit" width="800">
-  <br><em>Edit filament preset settings</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/k_profiles-1.png" alt="K-Profiles" width="800">
-  <br><em>Pressure advance (K-factor) profiles</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/k_profiles-2.png" alt="K-Profiles Edit" width="800">
-  <br><em>Edit K-factor profile settings</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-general.png" alt="Settings" width="800">
-  <br><em>General configuration and integrations</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-powerplugs.png" alt="Smart Plugs" width="800">
-  <br><em>Smart plug control and energy monitoring</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings_notifications.png" alt="Notifications" width="800">
-  <br><em>Multi-provider notification system</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings_api_keys.png" alt="API Keys" width="800">
-  <br><em>API keys and webhook endpoints</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-virtual-printer.png" alt="Virtual Printer Settings" width="800">
-  <br><em>Virtual printer configuration</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/slicer-virtual-printer.png" alt="Slicer Virtual Printer" width="800">
-  <br><em>Virtual printer appears in Bambu Studio/Orca Slicer</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/mqtt-debug-log.png" alt="MQTT Debug Log" width="800">
-  <br><em>MQTT debug logging for troubleshooting</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/quick_power_plug_sidebar.png" alt="Quick Power Plug" width="400">
-  <br><em>Quick power plug control in sidebar</em>
-</p>
-
-</details>
-
----
-
-## 🚀 Quick Start
-
-### Requirements
-- Python 3.10+ (3.11/3.12 recommended)
-- Bambu Lab printer with **Developer Mode** enabled (see below)
-- **"Store sent files on external storage"** enabled in Bambu Studio/OrcaSlicer
-- Same local network as printer
-
-### Installation
-
-#### Docker (Recommended)
-
-**Option A: Pre-built image (fastest)**
-```bash
-mkdir bambuddy && cd bambuddy
-curl -O https://raw.githubusercontent.com/maziggy/bambuddy/main/docker-compose.yml
-docker compose up -d
+# SYSU ISE 3D Print Manager
+
+中山大学智能工程学院 3D 打印平台项目，基于 `Bambuddy` 二次开发，面向实验室和课程场景提供打印机管理、模型库、在线切片、队列排队与云端兜底能力。
+
+本项目的核心目标不是单纯“能打印”，而是把一套真实可运维的校园 3D 打印平台沉淀为可复用的开源工程：
+
+- 开发板负责连接局域网内打印机、摄像头和本地设备
+- 腾讯云服务器负责公网访问、HTTPS、队列兜底和同步
+- 腾讯云 COS 负责静态资源与公共文件分发
+- 即使开发板卡死，前端仍然可以输入密码查看队列、上传登记和继续提交队列
+
+## 平台概览
+
+| 项目 | 当前实例 |
+| --- | --- |
+| 公网域名 | `https://sysuzgxytj.top` |
+| 腾讯云服务器 | `43.160.198.64` |
+| COS 地址 | `https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com` |
+| 队列策略 | 云端写入、双向同步、时间戳融合 |
+| 典型终端 | Bambu Lab 打印机、开发板、浏览器前端 |
+
+## 核心能力
+
+- 打印机总览：统一查看打印机状态、温度、耗材、控制按钮和实时连接状态。
+- 上传登记：用户可以通过队列页提交 MakerWorld 模型链接，以“上传登记”的方式进入人工审核/排队流程。
+- 队列韧性：公网 `/api/v1/queue*` 由云端队列后端兜底，开发板宕机时仍可继续登记和查看。
+- 双向同步：开发板与云端使用 `sync_uuid + updated_at + deleted_at` 做队列融合，支持恢复后自动补同步。
+- 模型库：支持浏览 MakerWorld、回填链接、沉淀模型条目与后续排队。
+- 在线切片：集成 Kiri:Moto，支持在浏览器中完成轻量切片。
+- COS 发布：支持将前端静态资源和公共文件上传到腾讯云 COS，便于公网分发。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    U[浏览器 / 用户] -->|HTTPS| N[Nginx / 腾讯云服务器]
+    N -->|/api/v1/queue* /api/v1/queue-sync*| Q[云端队列后端]
+    N -->|其他 API / WebSocket| T[SSH 反向隧道 127.0.0.1:18000]
+    T --> B[开发板 Bambuddy 主实例]
+    B --> P[局域网打印机]
+    B <-->|HTTP 127.0.0.1:18001| F[SSH 本地转发到云端队列后端]
+    Q <-->|sync_uuid + timestamp| B
+    U -->|静态资源 / 公共文件| C[Tencent COS]
 ```
 
-**Option B: Build from source**
-```bash
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
-docker compose up -d --build
+架构设计原则：
+
+- 打印机控制链路留在开发板，避免公网直接接触局域网设备。
+- 队列写入链路留在云端，避免开发板宕机时整个平台失去“上传登记”能力。
+- 静态资源和公共文件可走 COS，减轻云服务器带宽与回源压力。
+- 开发板与云端只同步“手动登记队列”，减少冲突面并降低恢复成本。
+
+## 界面预览
+
+### 打印机总览
+
+![打印机总览](docs/images/sysu-ise-printers.png)
+
+### 打印机实时画面
+
+![打印机实时画面](docs/images/sysu-ise-live-view.png)
+
+### 上传登记与队列页
+
+![上传登记与队列页](docs/images/sysu-ise-queue.png)
+
+### 模型库登记
+
+![模型库登记](docs/images/sysu-ise-model-library.png)
+
+### 在线切片
+
+![在线切片](docs/images/sysu-ise-kirimoto.png)
+
+## 仓库结构
+
+```text
+.
+├── backend/                # 共享后端源码（开发板与服务器共用）
+├── frontend/               # 前端源码
+├── spoolbuddy/             # SpoolBuddy 相关守护进程与脚本
+├── scripts/                # 发布、同步、维护脚本
+├── board/                  # 开发板部署说明与示例配置
+├── server/                 # 腾讯云服务器部署说明与示例配置
+├── deploy/                 # 其他部署资产（在线切片、公共代理等）
+├── Picture/                # 平台截图素材
+└── docs/images/            # README 使用的截图副本
 ```
 
-Open **http://localhost:8000** in your browser.
+说明：
 
-#### Optional: Real BambuStudio / Kiri:Moto Online Slicing
+- `backend/`、`frontend/`、`spoolbuddy/` 是共享源码，不在 `board/` / `server/` 里重复拷贝。
+- `board/` 与 `server/` 专门放各自部署角色的说明、环境变量示例和 systemd / nginx 配置。
+- `static/`、数据库、日志、缓存、构建产物均不建议进入 Git 仓库。
 
-When running from a full source checkout, the bundled `docker-compose.yml` can start an optional noVNC-backed BambuStudio container, while Kiri:Moto uses its normal web app directly:
+## 部署入口
 
-- `bambu_studio_web` on port `6080`
+### 1. 开发板部署
 
-To make the in-app online slicer entries work from another device on your LAN, set the matching base URL before starting:
+开发板负责：
+
+- 连接实验室内 Bambu 打印机
+- 运行主 Bambuddy 实例
+- 运行打印机控制、模型库、摄像头和本地外设逻辑
+- 通过 SSH 隧道把局域网服务映射到云端
+
+详细部署说明见：
+
+- [board/README.md](board/README.md)
+
+### 2. 腾讯云服务器部署
+
+服务器负责：
+
+- 提供公网 HTTPS 入口
+- 运行云端队列后端
+- 在开发板离线时继续承载“上传登记”和队列查看
+- 与开发板进行双向队列同步
+
+详细部署说明见：
+
+- [server/README.md](server/README.md)
+
+### 3. COS 部署
+
+推荐将前端静态资源和公共文件发布到 COS。
+
+典型流程：
+
+1. 在 `frontend/` 中构建前端，输出到仓库根目录 `static/`
+2. 使用 `scripts/publish_static_to_cos.sh` 上传 `static/assets`、`static/img`、`static/icons`
+3. 将 `PUBLIC_FILE_BASE_URL` 与 `PUBLIC_FILE_UPLOAD_BASE_URL` 配置为 COS 地址
+
+示例命令：
 
 ```bash
-export ONLINE_SLICER_BASE_URL="http://YOUR-SERVER-IP:6080/vnc.html?autoconnect=1&resize=remote"
-export ONLINE_KIRI_MOTO_URL="https://grid.space/kiri/"
+cd frontend
+npm ci
+VITE_ASSET_BASE="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/" npm run build
+
+cd ..
+COS_BASE_URL="https://sysuzngcxy-1322240898.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/" \
+  scripts/publish_static_to_cos.sh
 ```
 
-Start BambuStudio only when you need the remote desktop UI:
+如果你希望 COS 同时承担公共文件访问：
+
+- `PUBLIC_FILE_BASE_URL` 指向 COS 公共读地址
+- `PUBLIC_FILE_UPLOAD_BASE_URL` 指向相同或单独的上传地址
+
+## 开发与测试
+
+### 后端
 
 ```bash
-docker compose --profile bambu-slicer up -d --build
-```
-
-Then in Bambuddy:
-
-1. Open **Settings → Network** and confirm the Bambu Studio / Kiri:Moto URL you want to use
-2. Click **Kiri:Moto** in the sidebar for a manual session, or use **File Manager → Online Slice** on an STL file to preload a model
-3. Kiri:Moto opens directly in the browser and loads the STL automatically when launched from File Manager
-4. Export the sliced file from Kiri:Moto and upload it back into Bambuddy if you want it stored in the library
-
-> **Multi-architecture support:** Pre-built images are available for `linux/amd64` and `linux/arm64` (Raspberry Pi 4/5).
-
-> **macOS/Windows users:** Docker Desktop doesn't support `network_mode: host`. Edit docker-compose.yml: comment out `network_mode: host` and uncomment the `ports:` section. Printer discovery won't work - add printers manually by IP.
-
-> **Linux users:** If you get "permission denied" errors, either prefix commands with `sudo` (e.g., `sudo docker compose up -d`) or [add your user to the docker group](https://docs.docker.com/engine/install/linux-postinstall/).
-
-<details>
-<summary><strong>Docker Configuration & Commands</strong></summary>
-
-**Environment Variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TZ` | `UTC` | Your timezone (e.g., `America/New_York`, `Europe/Berlin`) |
-| `PORT` | `8000` | Port BamBuddy runs on (with host networking mode) |
-| `DEBUG` | `false` | Enable debug logging |
-| `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-**Data Persistence:**
-
-| Volume | Purpose |
-|--------|---------|
-| `bambuddy.db` | SQLite database with all your print data |
-| `archive/` | Archived 3MF files and thumbnails |
-| `logs/` | Application logs |
-
-**Updating:**
-
-```bash
-# Pre-built image: just pull the latest
-docker compose pull && docker compose up -d
-
-# From source: rebuild after pulling changes
-cd bambuddy && git pull && docker compose up -d --build
-```
-
-**Daily Beta Builds:**
-
-Beta builds with the latest fixes are pushed regularly to the same beta version tag:
-
-```bash
-# Pull the current beta
-docker pull ghcr.io/maziggy/bambuddy:0.2.2b1
-# or from Docker Hub
-docker pull maziggy/bambuddy:0.2.2b1
-```
-
-Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new daily builds are pushed.
-
-> **Note:** Beta builds use version tags like `0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
-
-**Useful Commands:**
-
-```bash
-# View logs
-docker compose logs -f
-
-# Stop/Start
-docker compose down
-docker compose up -d
-
-# Shell access
-docker compose exec bambuddy /bin/bash
-```
-
-**Custom Port:**
-
-```yaml
-ports:
-  - "3000:8000"  # Access on port 3000
-```
-
-**Reverse Proxy (Nginx):**
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name bambuddy.yourdomain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400;
-    }
-}
-```
-
-> **Note:** WebSocket support is required for real-time printer updates.
-
-**Network Mode Host** (required for printer discovery and camera streaming):
-
-```yaml
-services:
-  bambuddy:
-    build: .
-    network_mode: host
-```
-
-> **Note:** Docker's default bridge networking cannot receive SSDP multicast packets for automatic printer discovery. When using `network_mode: host`, Bambuddy auto-detects your network subnet and can discover printers via subnet scanning in the Add Printer dialog.
-
-</details>
-
-#### Manual Installation (Linux/macOS)
-
-```bash
-# Clone and setup
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
-python3 -m venv venv
-source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Run
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+pytest backend/tests/unit
 ```
 
-Open **http://localhost:8000** and add your printer!
-
-> **Need detailed instructions?** See the [Installation Guide](http://wiki.bambuddy.cool/getting-started/installation/)
-
-### Enabling Developer Mode
-
-Developer Mode allows third-party software like Bambuddy to control your printer over the local network.
-
-1. On printer: **Settings** → **Network** → **LAN Only Mode** → Enable
-2. Enable **Developer Mode** (appears after LAN Only Mode is enabled)
-3. Note the **Access Code** displayed
-4. Find IP address in network settings
-5. Find Serial Number in device info
-
-> **Note:** Developer Mode disables cloud features but provides full local control. Standard LAN Mode (without Developer Mode) only allows read-only monitoring.
-
-### Slicer Settings
-
-In Bambu Studio or OrcaSlicer, enable **"Store sent files on external storage"** so that print files (3MF) are saved to the printer's SD card. Bambuddy needs these files to extract thumbnails and 3D model previews.
-
-1. Open **Bambu Studio** or **OrcaSlicer**
-2. Go to the **Device** tab for your printer
-3. In **Print Options**, enable **Store Sent Files on External Storage**
-
----
-
-## 📚 Documentation
-
-Full documentation available at **[wiki.bambuddy.cool](http://wiki.bambuddy.cool)**:
-
-- [Installation](http://wiki.bambuddy.cool/getting-started/installation/) — All installation methods
-- [Getting Started](http://wiki.bambuddy.cool/getting-started/) — First printer setup
-- [Features](http://wiki.bambuddy.cool/features/) — Detailed feature guides
-- [Troubleshooting](http://wiki.bambuddy.cool/reference/troubleshooting/) — Common issues & solutions
-- [API Reference](http://wiki.bambuddy.cool/reference/api/) — REST API documentation
-
----
-
-## 🖨️ Supported Printers
-
-| Series | Models |
-|--------|--------|
-| X1 | X1, X1 Carbon, X1E |
-| H2 | H2D, H2D Pro, H2C, H2S |
-| P1 | P1P, P1S |
-| P2 | P2S |
-| A1 | A1, A1 Mini |
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Backend | Python, FastAPI, SQLAlchemy |
-| Frontend | React, TypeScript, Tailwind CSS |
-| Database | SQLite |
-| 3D Viewer | Three.js |
-| Communication | MQTT (TLS), FTPS |
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Here's how to help:
-
-1. **Test** — Report issues with your printer model
-2. **Translate** — Add new languages
-3. **Code** — Submit PRs for bugs or features
-4. **Document** — Improve wiki and guides
+### 前端
 
 ```bash
-# Development setup
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
-
-# Backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-DEBUG=true uvicorn backend.app.main:app --reload
-
-# Frontend (separate terminal)
-cd frontend && npm install && npm run dev
+cd frontend
+npm ci
+npm run dev
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+前端构建产物默认输出到仓库根目录 `static/`，该目录建议仅在部署阶段生成，不作为 Git 跟踪内容保留。
 
----
+## 与上游项目的关系
 
-## 📄 License
+本项目基于开源项目 `Bambuddy` 进行二次开发，重点加入了：
 
-AGPL-3.0 License — see [LICENSE](LICENSE) for details.
+- 面向校园场景的品牌与流程调整
+- “上传登记”式队列入口
+- 云端队列兜底与双向同步
+- COS 静态资源发布流程
+- 开发板 / 服务器双节点部署方案
 
----
+如果你计划继续二次开发，建议优先阅读：
 
-## 🙏 Acknowledgments
+- [board/README.md](board/README.md)
+- [server/README.md](server/README.md)
+- [deploy/public_proxy/README.md](deploy/public_proxy/README.md)
 
-- [SpoolEase](https://github.com/yanshay/SpoolEase) by yanshay — early inspiration for NFC-based spool tracking and AMS inventory concepts
-- [Bambu Lab](https://bambulab.com/) for amazing printers
-- The reverse engineering community for protocol documentation
-- All testers and contributors
+## License
 
----
-
-If you like Bambuddy and want to support it, you can <a href="https://ko-fi.com/maziggy" target=_blank>buy Martin a coffee</a>.
-
----
-
-<p align="center">
-  Made with ❤️ for the 3D printing community
-  <br><br>
-  <a href="https://discord.gg/aFS3ZfScHM">Join our Discord</a> •
-  <a href="https://github.com/maziggy/bambuddy/issues">Report Bug</a> •
-  <a href="https://github.com/maziggy/bambuddy/issues">Request Feature</a> •
-  <a href="http://wiki.bambuddy.cool">Documentation</a>
-</p>
+许可证沿用仓库根目录中的 [LICENSE](LICENSE)。

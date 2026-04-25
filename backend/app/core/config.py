@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     queue_contact_view_password: str = "sysuzgxytj"
     queue_admin_action_password: str = "sysuzgxytj"
+    queue_sync_remote_base_url: str = ""
+    queue_sync_shared_secret: str = ""
+    queue_sync_interval_seconds: int = 15
     cors_allowed_origins: list[str] = Field(default_factory=list, alias="CORS_ALLOWED_ORIGINS")
     public_file_base_url: str = Field(
         default="",

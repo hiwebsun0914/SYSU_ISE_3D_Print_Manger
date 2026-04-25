@@ -27,14 +27,8 @@ env/
 coverage.xml
 htmlcov/
 *.egg-info/
-dist/
 build/
-
-# Environment / secrets
-.env
-.env.local
-.env.*.local
-.jwt_secret
+dist/
 
 # Node / frontend
 node_modules/
@@ -48,6 +42,18 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.secret
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+.jwt_secret
 
 # Databases
 *.db
@@ -66,13 +72,24 @@ logs/
 bambutrack.log.*
 debug_logs/
 
-# Project data
+# Runtime data / generated artifacts
 archive/
-firmware/
+cache/
 data/
-/virtual_printer/
-/screenshots/
+firmware/
+release-artifacts/
+virtual_printer/
+screenshots/
 spoolbuddy/ssh/
+static/
+
+# Project-specific local files
+board/**/*.local
+server/**/*.local
+!board/env/
+!board/env/*.example
+!server/env/
+!server/env/*.example
 
 # Reports
 *.sarif

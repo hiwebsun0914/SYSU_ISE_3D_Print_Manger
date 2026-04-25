@@ -3,6 +3,9 @@
 This setup keeps Bambuddy and printer connectivity on the local development board,
 and uses the public server for HTTPS entry, API cache warming, and JSON snapshot fallback.
 
+For queue resilience, the public server can also run a second Bambuddy instance dedicated to
+manual queue registration (`/api/v1/queue*`), while printer APIs continue proxying to the board.
+
 Recommended topology:
 
 - Local board:
@@ -12,7 +15,8 @@ Recommended topology:
 - Public server `43.160.198.64`:
   - Terminates HTTPS for `sysuzgxytj.top`
   - Serves the built frontend locally
-  - Proxies API requests through WireGuard to the board
+  - Proxies most API requests through WireGuard to the board
+  - Optionally runs a local queue-registration backend on `127.0.0.1:18001`
   - Keeps key API responses cached and mirrored as on-disk JSON snapshots
 
 Why this layout:
@@ -22,6 +26,7 @@ Why this layout:
 - File uploads and slicing downloads do not need special NAT hacks
 - The board stays private and only makes outbound connections
 - The public server can keep serving cached API data when the board or tunnel fails
+- Manual queue registration can stay writable even while the board is offline
 
 ## Address Plan
 
@@ -98,6 +103,42 @@ systemctl daemon-reload
 systemctl enable --now bambuddy-cache-warmer.timer
 systemctl start bambuddy-cache-warmer.service
 ```
+
+### Optional: Queue-Resilient Split Backend
+
+To keep manual queue registration alive when the board crashes, run a second Bambuddy backend on the public server:
+
+- Board-facing Bambuddy continues serving printer APIs on `10.88.0.2:8000`
+- Public server queue Bambuddy listens on `127.0.0.1:18001`
+- Nginx routes `/api/v1/queue*` and `/api/v1/queue-sync*` to `127.0.0.1:18001`
+- All other `/api/` traffic still proxies to the board instance
+
+Recommended queue-backend environment on the public server:
+
+```bash
+PORT=18001
+DATA_DIR=/opt/bambuddy-queue/data
+LOG_DIR=/opt/bambuddy-queue/logs
+QUEUE_SYNC_REMOTE_BASE_URL=http://127.0.0.1:18000
+QUEUE_SYNC_SHARED_SECRET=replace-with-a-long-random-string
+QUEUE_SYNC_INTERVAL_SECONDS=15
+```
+
+Recommended queue-sync environment on the board instance:
+
+```bash
+# Preferred when the board already maintains an SSH tunnel to the public server:
+# add -L 127.0.0.1:18001:127.0.0.1:18001 to the tunnel and point sync at the local forward
+QUEUE_SYNC_REMOTE_BASE_URL=http://127.0.0.1:18001
+QUEUE_SYNC_SHARED_SECRET=replace-with-the-same-long-random-string
+QUEUE_SYNC_INTERVAL_SECONDS=15
+```
+
+With this setup:
+
+- the cloud queue instance becomes the public write path for queue password entry and submissions
+- the board keeps printer control and local device integrations
+- custom queue requests are reconciled in both directions using `sync_uuid + updated_at + deleted_at`
 
 ## Local Board
 

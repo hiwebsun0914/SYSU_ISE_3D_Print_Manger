@@ -1,3 +1,7 @@
+import hashlib
+import uuid
+from datetime import datetime
+
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -59,6 +63,32 @@ async def reinitialize_database():
 
 class Base(DeclarativeBase):
     pass
+
+
+def _normalize_sync_uuid_source_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def _legacy_custom_request_sync_uuid(row) -> str:
+    """Derive a stable sync UUID for pre-sync manual queue requests.
+
+    Older databases do not have sync UUIDs. Using a deterministic key for
+    historical manual requests lets board/server nodes converge without
+    duplicating every existing registration during the first sync.
+    """
+    parts = [
+        _normalize_sync_uuid_source_value(row["student_id"]),
+        _normalize_sync_uuid_source_value(row["requester_name"]),
+        _normalize_sync_uuid_source_value(row["contact_email"]),
+        _normalize_sync_uuid_source_value(row["request_model_url"]),
+        _normalize_sync_uuid_source_value(row["request_notes"]),
+        _normalize_sync_uuid_source_value(row["created_at"]),
+    ]
+    return hashlib.md5("|".join(parts).encode("utf-8")).hexdigest()
 
 
 async def get_db() -> AsyncSession:
@@ -1411,6 +1441,57 @@ async def run_migrations(conn):
         await conn.execute(text("ALTER TABLE print_queue ADD COLUMN request_notes TEXT"))
     except OperationalError:
         pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN sync_uuid VARCHAR(32)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+    except OperationalError:
+        # Older SQLite releases reject ALTER TABLE with a non-constant default.
+        # Fall back to a nullable column, then backfill below.
+        try:
+            await conn.execute(text("ALTER TABLE print_queue ADD COLUMN updated_at DATETIME"))
+        except OperationalError:
+            pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE print_queue ADD COLUMN deleted_at DATETIME"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("UPDATE print_queue SET updated_at = COALESCE(updated_at, created_at)"))
+    except OperationalError:
+        pass  # Table may not exist yet
+    try:
+        result = await conn.execute(
+            text(
+                """
+                SELECT id, custom_request, student_id, requester_name, contact_email,
+                       request_model_url, request_notes, created_at
+                FROM print_queue
+                WHERE sync_uuid IS NULL
+                """
+            )
+        )
+        missing_sync_uuid_rows = result.mappings().all()
+        for row in missing_sync_uuid_rows:
+            sync_uuid = (
+                _legacy_custom_request_sync_uuid(row)
+                if row["custom_request"]
+                else uuid.uuid4().hex
+            )
+            await conn.execute(
+                text("UPDATE print_queue SET sync_uuid = :sync_uuid WHERE id = :id"),
+                {"id": row["id"], "sync_uuid": sync_uuid},
+            )
+    except OperationalError:
+        pass  # Table may not exist yet
+    try:
+        await conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_print_queue_sync_uuid ON print_queue(sync_uuid)")
+        )
+    except OperationalError:
+        pass  # Index already exists or table missing
 
     # Migration: Add NFC reader and display control columns to spoolbuddy_devices
     try:

@@ -1955,7 +1955,7 @@ export function QueuePage() {
                 </div>
               </div>
               <div className="space-y-2 sm:space-y-3">
-                {historyItems.slice(0, 20).map((item, index) => (
+                {historyItems.map((item, index) => (
                   <SortableQueueItem
                     key={item.id}
                     item={item}

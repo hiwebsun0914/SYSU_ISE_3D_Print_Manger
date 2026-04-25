@@ -1,0 +1,20 @@
+[Unit]
+Description=Bambuddy queue backend
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bambuddy-queue/current
+EnvironmentFile=-/opt/bambuddy-queue/current/.env
+Environment="PATH=/opt/bambuddy-queue/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/bin/sh -lc 'exec /opt/bambuddy-queue/venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port ${PORT:-18001}'
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bambuddy-queue
+
+[Install]
+WantedBy=multi-user.target

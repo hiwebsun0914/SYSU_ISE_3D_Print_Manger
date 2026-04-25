@@ -38,6 +38,7 @@ from backend.app.api.routes import (
     pending_uploads,
     print_log,
     print_queue,
+    queue_sync,
     printers,
     projects,
     settings as settings_routes,
@@ -77,6 +78,7 @@ from backend.app.services.printer_manager import (
     printer_manager,
     printer_state_to_dict,
 )
+from backend.app.services.queue_sync import start_queue_sync, stop_queue_sync
 from backend.app.services.public_live_camera import public_live_camera_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.services.spool_assignment_notifications import (
@@ -4228,6 +4230,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.warning("Failed to sync virtual printers: %s", e)
 
+    # Start board/cloud queue reconciliation after the app is fully initialized.
+    start_queue_sync()
+
     yield
 
     # Shutdown
@@ -4244,6 +4249,7 @@ async def lifespan(app: FastAPI):
     stop_public_archive_backfill()
     stop_missing_archive_3mf_backfill()
     stop_expected_prints_cleanup()
+    stop_queue_sync()
     printer_manager.disconnect_all()
     await close_spoolman_client()
 
@@ -4303,6 +4309,8 @@ PUBLIC_API_ROUTES = {
 PUBLIC_API_PREFIXES = [
     # WebSocket connections handle their own auth
     "/api/v1/ws",
+    # Internal board/cloud queue sync authenticates with its own shared secret
+    "/api/v1/queue-sync",
 ]
 
 # Route patterns that are public (read-only display data)
@@ -4444,6 +4452,7 @@ app.include_router(local_presets.router, prefix=app_settings.api_prefix)
 app.include_router(smart_plugs.router, prefix=app_settings.api_prefix)
 app.include_router(print_log.router, prefix=app_settings.api_prefix)
 app.include_router(print_queue.router, prefix=app_settings.api_prefix)
+app.include_router(queue_sync.router, prefix=app_settings.api_prefix)
 app.include_router(background_dispatch_routes.router, prefix=app_settings.api_prefix)
 app.include_router(kprofiles.router, prefix=app_settings.api_prefix)
 app.include_router(notifications.router, prefix=app_settings.api_prefix)

@@ -17,7 +17,12 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_auth_if_enabled, require_ownership_permission
+from backend.app.core.auth import (
+    RequirePermissionIfAuthEnabled,
+    is_auth_enabled,
+    require_auth_if_enabled,
+    require_ownership_permission,
+)
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
@@ -48,6 +53,7 @@ router = APIRouter(prefix="/queue", tags=["queue"])
 QUEUE_CONTACT_PASSWORD_HEADER = "X-Queue-Contact-Password"
 QUEUE_ADMIN_PASSWORD_HEADER = "X-Queue-Admin-Password"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+MAKERWORLD_TITLE_RESOLUTION_TIMEOUT_SECONDS = 2.5
 
 
 def _is_valid_makerworld_url(url: str) -> bool:
@@ -91,6 +97,24 @@ def _contact_details_cache_headers(reveal_contact_details: bool) -> dict[str, st
     }
 
 
+async def _resolve_makerworld_title_quickly(url: str) -> str | None:
+    """Resolve a MakerWorld title without blocking queue requests for long."""
+    try:
+        return await asyncio.wait_for(
+            resolve_makerworld_model_title(url),
+            timeout=MAKERWORLD_TITLE_RESOLUTION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out resolving MakerWorld title for %s after %.1fs",
+            url,
+            MAKERWORLD_TITLE_RESOLUTION_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("Failed to resolve MakerWorld title for %s during queue request: %s", url, exc)
+    return None
+
+
 async def _get_next_pending_position(db: AsyncSession, printer_id: int | None) -> int:
     """Get the next queue position for pending items in the same assignment bucket."""
     if printer_id is not None:
@@ -98,14 +122,29 @@ async def _get_next_pending_position(db: AsyncSession, printer_id: int | None) -
             select(func.max(PrintQueueItem.position))
             .where(PrintQueueItem.printer_id == printer_id)
             .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.deleted_at.is_(None))
         )
     else:
         result = await db.execute(
             select(func.max(PrintQueueItem.position))
             .where(PrintQueueItem.printer_id.is_(None))
             .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.deleted_at.is_(None))
         )
     return (result.scalar() or 0) + 1
+
+
+def _active_queue_condition():
+    """Only expose queue rows that have not been soft-deleted."""
+    return PrintQueueItem.deleted_at.is_(None)
+
+
+def _apply_deleted_custom_request_tombstone(item: PrintQueueItem) -> None:
+    """Soft-delete custom requests so cloud/board nodes can reconcile later."""
+    now = datetime.now(timezone.utc)
+    item.status = "cancelled"
+    item.completed_at = now
+    item.deleted_at = now
 
 
 def _extract_filament_types_from_3mf(file_path: Path, plate_id: int | None = None) -> list[str]:
@@ -361,15 +400,11 @@ async def _populate_missing_request_model_titles(items: list[PrintQueueItem], db
         return
 
     titles = await asyncio.gather(
-        *(resolve_makerworld_model_title(item.request_model_url) for item in pending_items),
-        return_exceptions=True,
+        *(_resolve_makerworld_title_quickly(item.request_model_url) for item in pending_items),
     )
 
     updated = False
     for item, resolved_title in zip(pending_items, titles):
-        if isinstance(resolved_title, Exception):
-            logger.warning("Failed to resolve MakerWorld title for queue item %s: %s", item.id, resolved_title)
-            continue
         if not resolved_title and is_exact_makerworld_slug_title(item.request_model_title, item.request_model_url):
             item.request_model_title = None
             updated = True
@@ -403,6 +438,7 @@ async def list_queue(
             selectinload(PrintQueueItem.library_file),
             selectinload(PrintQueueItem.created_by),
         )
+        .where(_active_queue_condition())
         .order_by(PrintQueueItem.printer_id.nulls_first(), PrintQueueItem.position)
     )
 
@@ -576,7 +612,7 @@ async def add_to_queue(
         created_by_id=current_user.id if current_user else None,
     )
     if item.custom_request and item.request_model_url:
-        item.request_model_title = await resolve_makerworld_model_title(item.request_model_url)
+        item.request_model_title = await _resolve_makerworld_title_quickly(item.request_model_url)
     db.add(item)
     await db.commit()
     await db.refresh(item)
@@ -665,7 +701,9 @@ async def bulk_update_queue_items(
             raise HTTPException(400, "Printer not found")
 
     # Fetch all items
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(data.item_ids)))
+    result = await db.execute(
+        select(PrintQueueItem).where(PrintQueueItem.id.in_(data.item_ids)).where(_active_queue_condition())
+    )
     items = result.scalars().all()
 
     updated_count = 0
@@ -713,6 +751,7 @@ async def get_queue_item(
             selectinload(PrintQueueItem.created_by),
         )
         .where(PrintQueueItem.id == item_id)
+        .where(_active_queue_condition())
     )
     item = result.scalar_one_or_none()
     if not item:
@@ -744,7 +783,7 @@ async def update_queue_item(
     """Update a queue item."""
     user, can_modify_all = auth_result
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id).where(_active_queue_condition()))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
@@ -824,7 +863,9 @@ async def update_queue_item(
     if "request_model_url" in update_data and update_data["request_model_url"] is not None:
         update_data["request_model_url"] = update_data["request_model_url"].strip()
         if item.custom_request and update_data["request_model_url"]:
-            update_data["request_model_title"] = await resolve_makerworld_model_title(update_data["request_model_url"])
+            update_data["request_model_title"] = await _resolve_makerworld_title_quickly(
+                update_data["request_model_url"]
+            )
     if "request_notes" in update_data and update_data["request_notes"] is not None:
         update_data["request_notes"] = update_data["request_notes"].strip()
     if item.custom_request:
@@ -856,7 +897,7 @@ async def update_custom_queue_item_status(
     """Update status for manual queue registrations."""
     user, can_modify_all = auth_result
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id).where(_active_queue_condition()))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
@@ -923,20 +964,34 @@ async def delete_queue_item(
     item_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User | None = Depends(require_auth_if_enabled),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_DELETE_ALL,
+            Permission.QUEUE_DELETE_OWN,
+        )
+    ),
 ):
     """Remove an item from the queue."""
-    _queue_admin_access_granted(request)
+    user, can_modify_all = auth_result
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id).where(_active_queue_condition()))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
 
+    if await is_auth_enabled(db):
+        if not can_modify_all and item.created_by_id != user.id:
+            raise HTTPException(403, "You can only delete your own queue items")
+    else:
+        _queue_admin_access_granted(request)
+
     if item.status == "printing" and not item.custom_request:
         raise HTTPException(400, "Cannot delete item that is currently printing")
 
-    await db.delete(item)
+    if item.custom_request:
+        _apply_deleted_custom_request_tombstone(item)
+    else:
+        await db.delete(item)
     await db.commit()
 
     logger.info("Deleted queue item %s", item_id)
@@ -951,7 +1006,9 @@ async def reorder_queue(
 ):
     """Bulk update positions for queue items."""
     for reorder_item in data.items:
-        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == reorder_item.id))
+        result = await db.execute(
+            select(PrintQueueItem).where(PrintQueueItem.id == reorder_item.id).where(_active_queue_condition())
+        )
         item = result.scalar_one_or_none()
         if item and item.status == "pending":
             item.position = reorder_item.position
@@ -975,7 +1032,7 @@ async def cancel_queue_item(
     """Cancel a pending queue item."""
     user, can_modify_all = auth_result
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id).where(_active_queue_condition()))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
@@ -1009,7 +1066,7 @@ async def stop_queue_item(
     from backend.app.services.printer_manager import printer_manager
     from backend.app.services.tasmota import tasmota_service
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id))
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == item_id).where(_active_queue_condition()))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
@@ -1093,6 +1150,7 @@ async def start_queue_item(
         select(PrintQueueItem)
         .options(selectinload(PrintQueueItem.archive), selectinload(PrintQueueItem.printer))
         .where(PrintQueueItem.id == item_id)
+        .where(_active_queue_condition())
     )
     item = result.scalar_one_or_none()
     if not item:
