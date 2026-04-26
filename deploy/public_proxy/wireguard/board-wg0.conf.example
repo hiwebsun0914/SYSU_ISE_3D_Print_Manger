@@ -5,6 +5,6 @@ DNS = 1.1.1.1
 
 [Peer]
 PublicKey = REPLACE_WITH_VPS_PUBLIC_KEY
-Endpoint = 43.160.198.64:51820
+Endpoint = 203.0.113.10:51820
 AllowedIPs = 10.88.0.1/32
 PersistentKeepalive = 25

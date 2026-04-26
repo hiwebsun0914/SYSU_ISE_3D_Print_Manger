@@ -88,7 +88,7 @@ def warm_endpoint(base_url: str, endpoint: str, snapshot_root: Path, headers: di
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="https://sysuzgxytj.top", help="Public Bambuddy base URL")
+    parser.add_argument("--base-url", default="https://bambuddy.example.com", help="Public Bambuddy base URL")
     parser.add_argument(
         "--snapshot-root",
         default="/var/cache/bambuddy_snapshots",

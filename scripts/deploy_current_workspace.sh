@@ -32,10 +32,10 @@ Environment:
   SSH_PASSWORD                Optional SSH password. If set, sshpass is used.
   SSHPASS                     Same as SSH_PASSWORD.
   DEPLOY_MODE                 Default: auto
-  DEPLOY_HOST                 Default: 43.160.198.64
+  DEPLOY_HOST                 Default: public-server.example.com
   DEPLOY_USER                 Default: root
   DEPLOY_PORT                 Default: 22
-  DEPLOY_DOMAIN               Default: sysuzgxytj.top
+  DEPLOY_DOMAIN               Default: bambuddy.example.com
   SITE_ROOT                   Default: /var/www/bambuddy
   REMOTE_SOURCE_ROOT          Default: /opt/bambuddy-source-releases
   REMOTE_WORKSPACE_ROOT       Default: /opt/bambuddy-workspaces
@@ -78,10 +78,10 @@ FRONTEND_DIR="${REPO_ROOT}/frontend"
 STATIC_DIR="${REPO_ROOT}/static"
 
 DEPLOY_MODE="${DEPLOY_MODE:-auto}"
-DEPLOY_HOST="${DEPLOY_HOST:-43.160.198.64}"
+DEPLOY_HOST="${DEPLOY_HOST:-public-server.example.com}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 DEPLOY_PORT="${DEPLOY_PORT:-22}"
-DEPLOY_DOMAIN="${DEPLOY_DOMAIN:-sysuzgxytj.top}"
+DEPLOY_DOMAIN="${DEPLOY_DOMAIN:-bambuddy.example.com}"
 SITE_ROOT="${SITE_ROOT:-/var/www/bambuddy}"
 REMOTE_SOURCE_ROOT="${REMOTE_SOURCE_ROOT:-/opt/bambuddy-source-releases}"
 REMOTE_WORKSPACE_ROOT="${REMOTE_WORKSPACE_ROOT:-/opt/bambuddy-workspaces}"

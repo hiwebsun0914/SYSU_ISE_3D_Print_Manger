@@ -1,51 +1,54 @@
 # Public Proxy Deployment
 
-This setup keeps Bambuddy and printer connectivity on the local development board,
-and uses the public server for HTTPS entry, API cache warming, and JSON snapshot fallback.
+This optional deployment pattern keeps Bambuddy and printer connectivity on the local board,
+while using a public server for HTTPS entry, API cache warming, JSON snapshot fallback,
+and optional queue resilience.
 
-For queue resilience, the public server can also run a second Bambuddy instance dedicated to
-manual queue registration (`/api/v1/queue*`), while printer APIs continue proxying to the board.
+All public-facing values in this document use examples. Replace them before deploying:
 
-Recommended topology:
+- Example public domain: `bambuddy.example.com`
+- Example public server IP: `203.0.113.10`
+- Example WireGuard peer pair: `10.88.0.1/24` and `10.88.0.2/24`
+
+## Recommended Topology
 
 - Local board:
-  - Runs Bambuddy
-  - Stays on the same LAN as the Bambu printer
-  - Initiates a WireGuard tunnel to the public server
-- Public server `43.160.198.64`:
-  - Terminates HTTPS for `sysuzgxytj.top`
-  - Serves the built frontend locally
-  - Proxies most API requests through WireGuard to the board
-  - Optionally runs a local queue-registration backend on `127.0.0.1:18001`
-  - Keeps key API responses cached and mirrored as on-disk JSON snapshots
+  - Runs Bambuddy close to the printers
+  - Stays on the same LAN as the Bambu devices
+  - Initiates WireGuard or SSH connectivity to the public server
+- Public server:
+  - Terminates HTTPS for `bambuddy.example.com`
+  - Serves the built frontend locally or forwards static assets to COS
+  - Proxies printer APIs to the board
+  - Optionally runs a local queue backend on `127.0.0.1:18001`
+  - Keeps selected API responses cached and mirrored as JSON snapshots
 
-Why this layout:
+## Why Use This Pattern
 
-- WebSocket traffic works cleanly while the board is online
-- MJPEG / long-lived streams work cleanly
-- File uploads and slicing downloads do not need special NAT hacks
-- The board stays private and only makes outbound connections
-- The public server can keep serving cached API data when the board or tunnel fails
-- Manual queue registration can stay writable even while the board is offline
+- WebSocket traffic stays simple while the board is online.
+- Long-lived camera and streaming endpoints are easier to expose.
+- The board can stay private and only make outbound connections.
+- The public server can keep serving cached bootstrap API data if the board is offline.
+- Manual queue registration can remain writable through a cloud queue backend.
 
 ## Address Plan
 
 - Public server WireGuard IP: `10.88.0.1/24`
 - Local board WireGuard IP: `10.88.0.2/24`
-- Bambuddy upstream over tunnel: `http://10.88.0.2:8000`
-- Public HTTPS URL: `https://sysuzgxytj.top`
+- Board Bambuddy over tunnel: `http://10.88.0.2:8000`
+- Public HTTPS URL: `https://bambuddy.example.com`
 
 ## DNS
 
-Create these records:
+Create records similar to:
 
-- `A sysuzgxytj.top -> 43.160.198.64`
-- `A www.sysuzgxytj.top -> 43.160.198.64`
+- `A bambuddy.example.com -> 203.0.113.10`
+- `A www.bambuddy.example.com -> 203.0.113.10`
 
-## Public Server
+## Public Server Setup
 
 1. Install Nginx and WireGuard.
-2. Copy [nginx/sysuzgxytj.top.conf](./nginx/sysuzgxytj.top.conf) to `/etc/nginx/conf.d/sysuzgxytj.top.conf`.
+2. Copy [nginx/bambuddy.example.com.conf](./nginx/bambuddy.example.com.conf) to `/etc/nginx/conf.d/`.
 3. Create the local snapshot directory:
 
 ```bash
@@ -82,19 +85,19 @@ systemctl enable wg-quick@wg0
 - `443/tcp`
 - `51820/udp`
 
-9. Issue a certificate after DNS points to `43.160.198.64`:
+9. Issue a certificate after DNS points to your public server:
 
 ```bash
 curl -fsSL https://get.acme.sh | sh
 ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-~/.acme.sh/acme.sh --issue -d sysuzgxytj.top -d www.sysuzgxytj.top --webroot /var/www/letsencrypt --keylength ec-256
-~/.acme.sh/acme.sh --install-cert -d sysuzgxytj.top --ecc \
-  --fullchain-file /etc/nginx/ssl/sysuzgxytj.top/fullchain.pem \
-  --key-file /etc/nginx/ssl/sysuzgxytj.top/privkey.pem \
+~/.acme.sh/acme.sh --issue -d bambuddy.example.com -d www.bambuddy.example.com --webroot /var/www/letsencrypt --keylength ec-256
+~/.acme.sh/acme.sh --install-cert -d bambuddy.example.com --ecc \
+  --fullchain-file /etc/nginx/ssl/bambuddy.example.com/fullchain.pem \
+  --key-file /etc/nginx/ssl/bambuddy.example.com/privkey.pem \
   --reloadcmd "systemctl reload nginx"
 ```
 
-10. Validate and start Nginx:
+10. Validate and start services:
 
 ```bash
 nginx -t
@@ -104,12 +107,12 @@ systemctl enable --now bambuddy-cache-warmer.timer
 systemctl start bambuddy-cache-warmer.service
 ```
 
-### Optional: Queue-Resilient Split Backend
+## Optional: Queue-Resilient Split Backend
 
 To keep manual queue registration alive when the board crashes, run a second Bambuddy backend on the public server:
 
 - Board-facing Bambuddy continues serving printer APIs on `10.88.0.2:8000`
-- Public server queue Bambuddy listens on `127.0.0.1:18001`
+- Public server queue backend listens on `127.0.0.1:18001`
 - Nginx routes `/api/v1/queue*` and `/api/v1/queue-sync*` to `127.0.0.1:18001`
 - All other `/api/` traffic still proxies to the board instance
 
@@ -127,8 +130,6 @@ QUEUE_SYNC_INTERVAL_SECONDS=15
 Recommended queue-sync environment on the board instance:
 
 ```bash
-# Preferred when the board already maintains an SSH tunnel to the public server:
-# add -L 127.0.0.1:18001:127.0.0.1:18001 to the tunnel and point sync at the local forward
 QUEUE_SYNC_REMOTE_BASE_URL=http://127.0.0.1:18001
 QUEUE_SYNC_SHARED_SECRET=replace-with-the-same-long-random-string
 QUEUE_SYNC_INTERVAL_SECONDS=15
@@ -140,7 +141,7 @@ With this setup:
 - the board keeps printer control and local device integrations
 - custom queue requests are reconciled in both directions using `sync_uuid + updated_at + deleted_at`
 
-## Local Board
+## Local Board Setup
 
 1. Generate WireGuard keys and use [wireguard/board-wg0.conf.example](./wireguard/board-wg0.conf.example).
 2. Bring up the tunnel:
@@ -154,7 +155,7 @@ systemctl enable wg-quick@wg0
 4. Set Bambuddy `external_url` to:
 
 ```text
-https://sysuzgxytj.top
+https://bambuddy.example.com
 ```
 
 ## Notes
@@ -162,6 +163,5 @@ https://sysuzgxytj.top
 - Public printer control is high risk. Enable Bambuddy authentication before exposing it.
 - If uploads are very large, keep `client_max_body_size` high in Nginx.
 - If your camera feed is proxied through Bambuddy, the provided Nginx config already disables response buffering.
-- If the printer stream depends on direct LAN-only camera URLs, those URLs still need to be proxied through Bambuddy to be public.
-- The cache warmer intentionally fetches key `GET /api/v1/...` endpoints through the public hostname so nginx fills both proxy cache and the snapshot files under `/var/cache/bambuddy_snapshots`.
-- Real-time WebSocket updates still depend on the board being online; the snapshot fallback keeps page bootstrap data available, not live printer state streaming.
+- The cache warmer intentionally fetches key `GET /api/v1/...` endpoints through the public hostname so Nginx fills both proxy cache and snapshot files under `/var/cache/bambuddy_snapshots`.
+- Real-time WebSocket updates still depend on the board being online. The snapshot fallback improves page bootstrap resilience, not live printer-state streaming.

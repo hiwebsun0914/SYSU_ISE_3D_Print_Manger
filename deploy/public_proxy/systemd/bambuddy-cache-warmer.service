@@ -6,5 +6,4 @@ After=network-online.target nginx.service
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/default/bambuddy-cache-warmer
-ExecStart=/usr/bin/env python3 /opt/bambuddy/deploy/public_proxy/cache_warmer.py --base-url https://sysuzgxytj.top --snapshot-root /var/cache/bambuddy_snapshots
-
+ExecStart=/usr/bin/env python3 /opt/bambuddy/deploy/public_proxy/cache_warmer.py --base-url https://bambuddy.example.com --snapshot-root /var/cache/bambuddy_snapshots

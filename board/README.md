@@ -2,6 +2,8 @@
 
 开发板节点负责连接实验室局域网内的打印机，并运行主 Bambuddy 实例。它是整个平台的“设备侧控制中心”，但不再承担公网队列唯一写入入口。
 
+本文中的公网主机、域名和 COS 地址均使用示例值。实际部署时请替换为你自己的配置。
+
 ## 开发板职责
 
 - 连接 Bambu 打印机、摄像头、SpoolBuddy 等本地设备
@@ -36,7 +38,7 @@
 - 一台与打印机处于同一局域网的 Linux 开发板
 - 已安装 Git
 - 已安装 Docker 与 Docker Compose Plugin
-- 能访问腾讯云服务器 `43.160.198.64`
+- 能访问公网服务器，例如 `203.0.113.10` 或 `public-server.example.com`
 - 已准备 SSH 私钥，用于建立反向隧道
 
 ## 关键环境变量
@@ -110,6 +112,12 @@ docker compose --profile online-slicer up -d bambu_studio_web
 - `QUEUE_SERVER_PORT`
 - `PUBLIC_SERVER_BOARD_PORT`
 - `BOARD_APP_PORT`
+
+其中：
+
+- `PUBLIC_SERVER_HOST` 通常是你的公网服务器域名或 IP，例如 `public-server.example.com`
+- `QUEUE_SERVER_PORT` 默认对应云端队列后端监听端口
+- `PUBLIC_SERVER_BOARD_PORT` 默认对应服务器侧反向隧道入口
 
 然后将该服务安装到开发板：
 
