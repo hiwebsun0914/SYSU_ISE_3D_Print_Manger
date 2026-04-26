@@ -1,8 +1,8 @@
 # README.zh-CN
 
-中文说明已经整合到仓库根目录的 [README.md](README.md)。
+中文主页已经放在仓库根目录的 [README.md](README.md)。
 
-建议直接阅读以下文档：
+建议优先阅读：
 
 - [README.md](README.md)
 - [board/README.md](board/README.md)

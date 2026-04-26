@@ -5,8 +5,7 @@
 <h1 align="center">SYSU ISE 3D Print Manager</h1>
 
 <p align="center">
-  A campus-ready 3D printing platform built on <code>Bambuddy</code>, with board-side printer control,
-  cloud-backed queue resilience, and optional Tencent COS static hosting.
+  基于 <code>Bambuddy</code> 二次开发的校园级 3D 打印平台，支持开发板侧打印机控制、云端队列兜底，以及可选的腾讯云 COS 静态资源发布。
 </p>
 
 <p align="center">
@@ -18,113 +17,113 @@
 </p>
 
 > [!IMPORTANT]
-> This repository uses example infrastructure values in documentation and templates.
-> Replace them with your own values during deployment.
+> 本仓库中的域名、服务器地址和 COS 地址均使用示例值。
+> 实际部署时，请替换为你自己的配置。
 >
-> - Example public domain: `bambuddy.example.com`
-> - Example public server: `203.0.113.10`
-> - Example COS base URL: `https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/`
+> - 示例公网域名：`bambuddy.example.com`
+> - 示例公网服务器：`203.0.113.10`
+> - 示例 COS 地址：`https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/`
 
-## Overview
+## 项目简介
 
-SYSU ISE 3D Print Manager is a secondary development project based on `Bambuddy`.
-It is designed for labs, courses, and shared maker spaces that need more than a single-device dashboard.
+SYSU ISE 3D Print Manager 是一个面向实验室、课程和共享创客空间的 3D 打印管理平台。
+它基于 `Bambuddy` 进行二次开发，但目标不只是“能连上打印机”，而是沉淀一套真正适合多人共用、可持续运维、可直接开源部署的工程方案。
 
-This repository focuses on one practical problem:
+本项目重点解决一个实际问题：
 
-- the development board should stay close to the printers
-- the public website should stay available even if the board crashes
-- queue browsing, password entry, and upload registration should not depend on the board being online
+- 开发板必须靠近打印机和局域网设备
+- 公网入口不能随着开发板宕机一起失效
+- 队列浏览、密码输入和上传登记不应该依赖开发板始终在线
 
-To make that work, the system splits responsibilities across three roles:
+因此，系统将职责拆分为三部分：
 
-- the board handles printers, cameras, and LAN-only device integrations
-- the cloud server handles HTTPS, public queue writes, and recovery sync
-- Tencent COS can serve static assets and public files to reduce server pressure
+- 开发板负责打印机、摄像头和局域网设备集成
+- 公网服务器负责 HTTPS、云端队列写入和故障恢复同步
+- 腾讯云 COS 可选用于承载静态资源和公共文件，降低服务器压力
 
-## Highlights
+## 项目特性
 
-- Printer dashboard for status, temperatures, consumables, and control actions.
-- Upload registration flow for MakerWorld links and manual queue intake.
-- Cloud-backed queue endpoints so users can still register and browse jobs when the board is offline.
-- Bidirectional queue reconciliation using `sync_uuid + updated_at + deleted_at`.
-- Model library workflow for collecting and reusing MakerWorld resources.
-- Browser-based Kiri:Moto entry for lightweight online slicing.
-- Direct deployment from this GitHub repository without extra private patch bundles.
+- 打印机总览：查看状态、温度、耗材和控制入口。
+- 上传登记：支持通过 MakerWorld 链接进入人工审核或排队流程。
+- 云端队列兜底：即使开发板离线，用户仍可继续查看和提交队列。
+- 双向队列同步：使用 `sync_uuid + updated_at + deleted_at` 进行融合。
+- 模型库沉淀：支持收集、整理和复用模型资源。
+- 在线切片入口：集成 Kiri:Moto，支持轻量浏览器切片。
+- 直接部署：从本 GitHub 仓库即可完成部署，无需额外私有补丁包。
 
-## Screenshots
+## 界面预览
 
-| Printer Dashboard | Live View |
+| 打印机总览 | 实时画面 |
 | --- | --- |
-| ![Printer dashboard](docs/images/sysu-ise-printers.png) | ![Live view](docs/images/sysu-ise-live-view.png) |
+| ![打印机总览](docs/images/sysu-ise-printers.png) | ![实时画面](docs/images/sysu-ise-live-view.png) |
 
-| Queue Registration | Model Library |
+| 上传登记与队列 | 模型库 |
 | --- | --- |
-| ![Queue registration](docs/images/sysu-ise-queue.png) | ![Model library](docs/images/sysu-ise-model-library.png) |
+| ![上传登记与队列](docs/images/sysu-ise-queue.png) | ![模型库](docs/images/sysu-ise-model-library.png) |
 
 <p align="center">
-  <img src="docs/images/sysu-ise-kirimoto.png" alt="Online slicer" width="82%">
+  <img src="docs/images/sysu-ise-kirimoto.png" alt="在线切片" width="82%">
 </p>
 
-## Architecture
+## 架构设计
 
 ```mermaid
 flowchart LR
-    U[Browser] -->|HTTPS| N[Public Nginx]
-    N -->|/api/v1/queue*| Q[Cloud Queue Backend]
-    N -->|Other API / WebSocket| T[Reverse Tunnel to Board]
-    T --> B[Board-side Bambuddy]
-    B --> P[LAN Printers]
-    B <-->|Queue sync| Q
-    U -->|Static assets / public files| C[Tencent COS]
+    U[浏览器] -->|HTTPS| N[公网 Nginx]
+    N -->|/api/v1/queue*| Q[云端队列后端]
+    N -->|其他 API / WebSocket| T[开发板反向隧道]
+    T --> B[开发板侧 Bambuddy]
+    B --> P[局域网打印机]
+    B <-->|队列同步| Q
+    U -->|静态资源 / 公共文件| C[Tencent COS]
 ```
 
-Design principles:
+设计原则：
 
-- Keep printer control on the board so LAN devices are never directly exposed to the Internet.
-- Keep public queue writes on the cloud server so upload registration survives board outages.
-- Keep synchronization narrow and explicit so recovery stays predictable.
-- Keep static files optional and decoupled so deployments can choose whether to use COS.
+- 打印机控制放在开发板，避免局域网设备直接暴露到公网。
+- 队列写入放在云端，避免开发板故障时“上传登记”能力消失。
+- 同步范围尽量收敛，只处理必要队列数据，降低冲突和恢复成本。
+- 静态资源与公共文件单独拆出，部署时可以自由选择是否接入 COS。
 
-## What Each Infrastructure Piece Does
+## 基础设施分别负责什么
 
-| Component | What it is responsible for | What you need to configure | Example value |
+| 组件 | 负责内容 | 需要配置什么 | 示例值 |
 | --- | --- | --- | --- |
-| Public domain | End-user access entry, HTTPS hostname, reverse-proxy target | DNS, TLS certificate, Nginx `server_name`, external URLs | `bambuddy.example.com` |
-| Public server | Public Nginx, queue backend, board tunnel endpoint, optional snapshot/cache service | Hostname or IP, firewall, systemd, Nginx, Python environment | `203.0.113.10` |
-| Tencent COS | Static frontend files and optional public file hosting | Bucket, region, `PUBLIC_FILE_BASE_URL`, `PUBLIC_FILE_UPLOAD_BASE_URL` | `https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/` |
+| 公网域名 | 用户访问入口、HTTPS 主机名、反向代理外部地址 | DNS、TLS 证书、Nginx `server_name`、外部访问 URL | `bambuddy.example.com` |
+| 公网服务器 | Nginx、云端队列后端、开发板隧道入口、可选快照缓存 | 主机名或 IP、防火墙、systemd、Nginx、Python 环境 | `203.0.113.10` |
+| 腾讯云 COS | 前端静态资源和公共文件分发 | Bucket、地域、`PUBLIC_FILE_BASE_URL`、`PUBLIC_FILE_UPLOAD_BASE_URL` | `https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/` |
 
-If you do not need COS, the project can still run with server-hosted static files.
+如果你不需要 COS，这个项目依然可以使用服务器本地静态文件方式运行。
 
-## Quick Start
+## 快速开始
 
-### 1. Clone the repository
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/hiwebsun0914/SYSU_ISE_3D_Print_Manger.git
 cd SYSU_ISE_3D_Print_Manger
 ```
 
-### 2. Deploy the board node
+### 2. 部署开发板节点
 
-The board is responsible for printers, cameras, and LAN-side integrations.
+开发板负责打印机、摄像头和局域网侧集成。
 
-- Guide: [board/README.md](board/README.md)
-- Template env: [board/env/board.env.example](board/env/board.env.example)
-- Tunnel service: [board/systemd/bambuddy-reverse-tunnel.service](board/systemd/bambuddy-reverse-tunnel.service)
+- 说明文档：[board/README.md](board/README.md)
+- 环境变量模板：[board/env/board.env.example](board/env/board.env.example)
+- 隧道服务模板：[board/systemd/bambuddy-reverse-tunnel.service](board/systemd/bambuddy-reverse-tunnel.service)
 
-### 3. Deploy the public server
+### 3. 部署公网服务器
 
-The server is responsible for HTTPS, public queue writes, and synchronization with the board.
+公网服务器负责 HTTPS、上传登记和与开发板的同步。
 
-- Guide: [server/README.md](server/README.md)
-- Queue env: [server/env/bambuddy-queue.env.example](server/env/bambuddy-queue.env.example)
-- Systemd: [server/systemd/bambuddy-queue.service](server/systemd/bambuddy-queue.service)
-- Nginx: [server/nginx/bambuddy.example.com.conf](server/nginx/bambuddy.example.com.conf)
+- 说明文档：[server/README.md](server/README.md)
+- 队列环境变量：[server/env/bambuddy-queue.env.example](server/env/bambuddy-queue.env.example)
+- systemd 模板：[server/systemd/bambuddy-queue.service](server/systemd/bambuddy-queue.service)
+- Nginx 模板：[server/nginx/bambuddy.example.com.conf](server/nginx/bambuddy.example.com.conf)
 
-### 4. Optionally publish static assets to Tencent COS
+### 4. 可选：发布静态资源到腾讯云 COS
 
-Build the frontend locally:
+先在本地构建前端：
 
 ```bash
 cd frontend
@@ -132,7 +131,7 @@ npm ci
 VITE_ASSET_BASE="https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/" npm run build
 ```
 
-Publish to COS:
+再发布到 COS：
 
 ```bash
 cd ..
@@ -140,35 +139,35 @@ COS_BASE_URL="https://example-bucket.cos.ap-guangzhou.myqcloud.com/BAMBUDDY/" \
   scripts/publish_static_to_cos.sh
 ```
 
-Then point:
+随后将以下变量指向你自己的 COS 地址：
 
-- `PUBLIC_FILE_BASE_URL` to the public read URL
-- `PUBLIC_FILE_UPLOAD_BASE_URL` to the upload URL or the same bucket base
+- `PUBLIC_FILE_BASE_URL`
+- `PUBLIC_FILE_UPLOAD_BASE_URL`
 
-## Repository Layout
+## 仓库结构
 
 ```text
 .
-├── backend/                # Shared backend source
-├── frontend/               # Shared frontend source
-├── spoolbuddy/             # Printer spool and accessory services
-├── scripts/                # Build, deploy, and maintenance scripts
-├── board/                  # Board-side deployment docs and templates
-├── server/                 # Public server deployment docs and templates
-├── deploy/                 # Extra deployment assets such as public proxy helpers
-├── Picture/                # Original project screenshots
-└── docs/images/            # README-ready image copies
+├── backend/                # 共享后端源码
+├── frontend/               # 共享前端源码
+├── spoolbuddy/             # 打印耗材和外设相关服务
+├── scripts/                # 构建、部署和维护脚本
+├── board/                  # 开发板部署文档与模板
+├── server/                 # 公网服务器部署文档与模板
+├── deploy/                 # 其他部署资产，如公共代理方案
+├── Picture/                # 原始截图素材
+└── docs/images/            # README 使用的整理后截图
 ```
 
-Notes:
+说明：
 
-- `backend/`, `frontend/`, and `spoolbuddy/` are shared across board and server roles.
-- `board/` and `server/` contain role-specific deployment guides and config templates.
-- Runtime databases, build outputs, logs, and caches are intentionally excluded from Git.
+- `backend/`、`frontend/`、`spoolbuddy/` 是开发板和服务器共用的源码。
+- `board/` 与 `server/` 专门存放角色化部署说明和模板。
+- 运行时数据库、构建产物、日志和缓存默认不纳入 Git 跟踪。
 
-## Development
+## 本地开发
 
-### Backend
+### 后端
 
 ```bash
 python -m venv .venv
@@ -177,7 +176,7 @@ pip install -r requirements.txt
 pytest backend/tests/unit
 ```
 
-### Frontend
+### 前端
 
 ```bash
 cd frontend
@@ -185,30 +184,29 @@ npm ci
 npm run dev
 ```
 
-By default, frontend production builds are written to the repository root `static/` directory.
-That directory is meant to be generated during deployment rather than versioned in Git.
+默认情况下，前端生产构建产物会输出到仓库根目录的 `static/`。
+这个目录应视为部署时生成内容，而不是 Git 版本内容。
 
-## Deployment Docs
+## 部署文档入口
 
-- [board/README.md](board/README.md): board-side deployment and reverse-tunnel setup
-- [server/README.md](server/README.md): public server, queue backend, and Nginx setup
-- [deploy/public_proxy/README.md](deploy/public_proxy/README.md): optional WireGuard and cache-snapshot public proxy pattern
+- [board/README.md](board/README.md)：开发板部署、反向隧道与同步配置
+- [server/README.md](server/README.md)：公网服务器、云端队列后端与 Nginx 配置
+- [deploy/public_proxy/README.md](deploy/public_proxy/README.md)：可选的 WireGuard 与快照缓存公网代理方案
 
-## Relationship to Upstream Bambuddy
+## 与上游 Bambuddy 的关系
 
-This project builds on the upstream `Bambuddy` codebase and adapts it for shared-campus operations.
-The main additions in this repository are:
+本项目基于上游 `Bambuddy` 代码继续演化，主要增加了以下能力：
 
-- upload registration workflow for queue intake
-- cloud-backed queue resilience
-- board and public-server split deployment
-- Tencent COS publishing workflow
-- campus-oriented branding and operational structure
+- 上传登记式队列入口
+- 云端队列兜底与恢复同步
+- 开发板 / 公网服务器双节点部署方案
+- 腾讯云 COS 静态资源发布流程
+- 面向校园和实验室场景的结构化改造
 
-The upstream project that inspired this repository structure and presentation is:
+当前 README 的结构整理也参考了上游项目：
 
 - [maziggy/bambuddy README](https://github.com/maziggy/bambuddy/blob/main/README.md)
 
-## License
+## 许可证
 
-This repository follows the license defined in [LICENSE](LICENSE).
+本仓库许可证以根目录中的 [LICENSE](LICENSE) 为准。
