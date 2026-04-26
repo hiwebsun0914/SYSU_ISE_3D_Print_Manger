@@ -34,6 +34,7 @@
 ## 前置条件
 
 - 一台与打印机处于同一局域网的 Linux 开发板
+- 已安装 Git
 - 已安装 Docker 与 Docker Compose Plugin
 - 能访问腾讯云服务器 `43.160.198.64`
 - 已准备 SSH 私钥，用于建立反向隧道
@@ -67,6 +68,8 @@ git clone https://github.com/hiwebsun0914/SYSU_ISE_3D_Print_Manger.git
 cd SYSU_ISE_3D_Print_Manger
 ```
 
+整个开发板部署直接使用这个仓库，不需要额外的私有代码包。
+
 ### 2. 配置环境变量
 
 ```bash
@@ -99,7 +102,16 @@ docker compose --profile online-slicer up -d bambu_studio_web
 
 ### 4. 安装 SSH 隧道服务
 
-将 `systemd/bambuddy-reverse-tunnel.service` 安装到开发板：
+先按你的环境修改 `board/systemd/bambuddy-reverse-tunnel.service` 里的这几行：
+
+- `SSH_KEY_PATH`
+- `TUNNEL_USER`
+- `PUBLIC_SERVER_HOST`
+- `QUEUE_SERVER_PORT`
+- `PUBLIC_SERVER_BOARD_PORT`
+- `BOARD_APP_PORT`
+
+然后将该服务安装到开发板：
 
 ```bash
 sudo cp board/systemd/bambuddy-reverse-tunnel.service /etc/systemd/system/
@@ -119,6 +131,7 @@ sudo systemctl enable --now bambuddy-reverse-tunnel.service
 ```bash
 docker ps
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:18001/health
 systemctl status bambuddy-reverse-tunnel.service --no-pager
 ```
 

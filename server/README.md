@@ -48,7 +48,7 @@
 
 - 一台可公网访问的 Linux 云服务器
 - 已解析域名到服务器 IP
-- 已安装 Nginx、Python 3.11+、virtualenv
+- 已安装 Git、Nginx、Python 3.11+
 - 已具备一个用于 SSH 反向隧道的账号
 
 ## 目录规划
@@ -65,31 +65,28 @@
 
 ## 部署步骤
 
-### 1. 上传共享源码
-
-将以下内容发布到服务器版本目录：
-
-- `backend/`
-- `requirements.txt`
-- `pyproject.toml`
-
-例如：
+### 1. 直接从 GitHub 克隆仓库
 
 ```bash
-rsync -av backend requirements.txt pyproject.toml root@43.160.198.64:/opt/bambuddy-queue/current/
+sudo mkdir -p /opt/bambuddy-queue/releases /opt/bambuddy-queue/data /opt/bambuddy-queue/logs
+RELEASE_DIR="/opt/bambuddy-queue/releases/$(date +%Y%m%d-%H%M%S)"
+sudo git clone --depth 1 https://github.com/hiwebsun0914/SYSU_ISE_3D_Print_Manger.git "$RELEASE_DIR"
+sudo ln -sfn "$RELEASE_DIR" /opt/bambuddy-queue/current
 ```
+
+这样服务器可以直接用 GitHub 仓库中的共享源码和部署模板，不需要额外打包上传零散文件。
 
 ### 2. 创建虚拟环境并安装依赖
 
 ```bash
-python3 -m venv /opt/bambuddy-queue/venv
-/opt/bambuddy-queue/venv/bin/pip install -r /opt/bambuddy-queue/current/requirements.txt
+sudo python3 -m venv /opt/bambuddy-queue/venv
+sudo /opt/bambuddy-queue/venv/bin/pip install -r /opt/bambuddy-queue/current/requirements.txt
 ```
 
 ### 3. 配置环境变量
 
 ```bash
-cp server/env/bambuddy-queue.env.example /opt/bambuddy-queue/current/.env
+sudo cp /opt/bambuddy-queue/current/server/env/bambuddy-queue.env.example /opt/bambuddy-queue/current/.env
 ```
 
 关键配置：
@@ -108,7 +105,7 @@ QUEUE_SYNC_INTERVAL_SECONDS=15
 ### 4. 安装 systemd 服务
 
 ```bash
-sudo cp server/systemd/bambuddy-queue.service /etc/systemd/system/
+sudo cp /opt/bambuddy-queue/current/server/systemd/bambuddy-queue.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now bambuddy-queue.service
 ```
@@ -116,10 +113,17 @@ sudo systemctl enable --now bambuddy-queue.service
 ### 5. 安装 Nginx 配置
 
 ```bash
-sudo cp server/nginx/sysuzgxytj.top.conf /etc/nginx/conf.d/
+sudo cp /opt/bambuddy-queue/current/server/nginx/sysuzgxytj.top.conf /etc/nginx/conf.d/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+首次部署前，请先把该文件中的以下内容替换成你自己的值：
+
+- `server_name`
+- `ssl_certificate`
+- `ssl_certificate_key`
+- 如有需要，静态站点 `root`
 
 这份配置会把：
 
@@ -132,8 +136,21 @@ sudo systemctl reload nginx
 
 ```bash
 curl http://127.0.0.1:18001/health
-curl https://sysuzgxytj.top/api/v1/queue/
+curl https://<your-domain>/api/v1/queue/
 systemctl status bambuddy-queue.service --no-pager
+```
+
+## 更新发布
+
+推荐使用“新目录克隆 + 切换 `current` 软链接”的方式更新：
+
+```bash
+RELEASE_DIR="/opt/bambuddy-queue/releases/$(date +%Y%m%d-%H%M%S)"
+sudo git clone --depth 1 https://github.com/hiwebsun0914/SYSU_ISE_3D_Print_Manger.git "$RELEASE_DIR"
+sudo /opt/bambuddy-queue/venv/bin/pip install -r "$RELEASE_DIR/requirements.txt"
+sudo ln -sfn "$RELEASE_DIR" /opt/bambuddy-queue/current
+sudo systemctl restart bambuddy-queue
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## 队列韧性说明

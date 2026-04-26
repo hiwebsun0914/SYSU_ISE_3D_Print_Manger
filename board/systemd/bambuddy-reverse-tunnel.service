@@ -6,16 +6,23 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+# Edit these values before enabling the unit on your own board.
+Environment=SSH_KEY_PATH=/root/.ssh/bambuddy_reverse_tunnel
+Environment=TUNNEL_USER=bambuddy-tunnel
+Environment=PUBLIC_SERVER_HOST=43.160.198.64
+Environment=QUEUE_SERVER_PORT=18001
+Environment=PUBLIC_SERVER_BOARD_PORT=18000
+Environment=BOARD_APP_PORT=8000
 ExecStart=/usr/bin/ssh -NT \
   -o BatchMode=yes \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
   -o StrictHostKeyChecking=yes \
-  -i /root/.ssh/bambuddy_reverse_tunnel \
-  -L 127.0.0.1:18001:127.0.0.1:18001 \
-  -R 127.0.0.1:18000:127.0.0.1:8000 \
-  bambuddy-tunnel@43.160.198.64
+  -i ${SSH_KEY_PATH} \
+  -L 127.0.0.1:${QUEUE_SERVER_PORT}:127.0.0.1:${QUEUE_SERVER_PORT} \
+  -R 127.0.0.1:${PUBLIC_SERVER_BOARD_PORT}:127.0.0.1:${BOARD_APP_PORT} \
+  ${TUNNEL_USER}@${PUBLIC_SERVER_HOST}
 Restart=always
 RestartSec=5
 
